@@ -1,5 +1,5 @@
 /**
- * Agriscan — RS485 Soil Sensor 7-in-1 + WiFi + WebServer
+ * Agriscan v2 — RS485 Soil Sensor 7-in-1 + WiFi + WebServer
  * GET /data  →  JSON สำหรับแดชบอร์ด
  */
 
