@@ -7,7 +7,7 @@ const CONFIG = {
   retryDelay:   3000,
   useMockOnFail: false,   // ไม่มี mock data — แสดงข้อมูลจริงเท่านั้น
   // URL ของ backend บน Render
-  cloudApiUrl:  'https://agriscan-xynf.onrender.com'
+  cloudApiUrl:  'https://agriscan-v2.onrender.com'
 };
 
 // ─── เกณฑ์พืชรายชนิด (อ้างอิงกรมพัฒนาที่ดิน) ───────────────

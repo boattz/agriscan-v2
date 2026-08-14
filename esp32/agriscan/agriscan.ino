@@ -18,7 +18,7 @@
 
 // ── Cloud Upload ───────────────────────────────────────────
 // URL ของ backend บน Render
-const char* CLOUD_URL = "https://agriscan-xynf.onrender.com/api/readings";
+const char* CLOUD_URL = "https://agriscan-v2.onrender.com/api/readings";
 // API key อยู่ใน secrets.h (ดูจาก Render Dashboard → Environment → API_KEY)
 // ความถี่ส่งข้อมูลขึ้นคลาวด์ (มิลลิวินาที) — 3,000 = ทุก 3 วินาที
 #define POST_INTERVAL_MS  3000
