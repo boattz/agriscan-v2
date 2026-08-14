@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+venv/
+.venv/
+
+# ESP32 / Arduino
+build/
+*.elf
+*.bin
+*.map
+*.partitions.bin
+esp32/agriscan/secrets.h
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+
+# Local dev DB
+backend/agriscan.db
