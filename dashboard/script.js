@@ -10,6 +10,98 @@ const CONFIG = {
   cloudApiUrl:  'https://agriscan-xynf.onrender.com'
 };
 
+// ─── เกณฑ์พืชรายชนิด (อ้างอิงกรมพัฒนาที่ดิน) ───────────────
+// ที่มา: ศักยภาพการให้ผลผลิตพืชเศรษฐกิจของชุดดินในประเทศไทย (สำนักสำรวจและวิจัยทรัพยากรดิน, กรมพัฒนาที่ดิน)
+// ตารางที่ 3 (ข้าว) และตารางที่ 4 (ข้าวโพด) — ดัดแปลงจากบัณฑิตและคำรณ (2542)
+// ยางพารา: คู่มือการจำแนกความเหมาะสมของดินสำหรับพืชเศรษฐกิจ (เอกสารวิชาการ เล่ม 28, กองสำรวจและจำแนกดิน)
+// โครงสร้าง: min/max = ขอบเขตยังปลูกได้ (S3) · optMin/optMax = ช่วงเหมาะสมสูงสุด (S1)
+// หมายเหตุ: EC วัดเป็น µS/cm (1 dS/m = 1,000 µS/cm) · ความชื้น (%) เป็นแนวทางรดน้ำ (LDD ใช้ mm/ฤดู)
+const CROP_CRITERIA = {
+  rice: {
+    label: 'ข้าว',
+    icon:  '🌾',
+    moisture: { min: 60, max: 100 },   // นาข้าว — ดินควรชื้นถึงแฉะ (แนวทางรดน้ำ)
+    ph:       { min: 4.0, max: 8.4, optMin: 5.6, optMax: 7.3 },  // LDD ตาราง 3: S1 5.6–7.3, S2 5.1–5.5/7.4–7.8, S3 4.0–5.0/7.8–8.4
+    ec:       { min: 0, max: 2000 },   // LDD ตาราง 3: S1 <2 dS/m, S2 2–5, S3 5–10 dS/m
+    temp:     { min: 18, max: 35 },    // LDD ตาราง 3: S1 22–30, S2 31–33, S3 34–35°C
+    npk: {
+      nLow: 50, pLow: 10, pMid: 25, kLow: 60, kMid: 90,
+      fertN: 'ปุ๋ยยูเรีย 46-0-0 หรือ 21-0-0',
+      fertP: 'ปุ๋ย 0-46-0 หรือหินฟอสเฟต',
+      fertK: 'ปุ๋ย 0-0-60 หรือโพแทสเซียมคลอไรด์'
+    }
+  },
+  corn: {
+    label: 'ข้าวโพด',
+    icon:  '🌽',
+    moisture: { min: 50, max: 80 },    // ข้าวโพด — ชื้นสม่ำเสมอ ไม่แฉะ (แนวทางรดน้ำ)
+    ph:       { min: 4.0, max: 8.4, optMin: 5.1, optMax: 7.3 },  // LDD ตาราง 4: S1 5.1–7.3, S2 4.5–5.0/7.4–7.8, S3 4.0–4.4/7.9–8.4
+    ec:       { min: 0, max: 2000 },   // LDD ตาราง 4: S1 <2 dS/m, S2 2–4, S3 4–8 dS/m
+    temp:     { min: 16, max: 35 },    // LDD ตาราง 4: S1 24–30, S2 31–32, S3 33–35°C
+    npk: {
+      nLow: 60, pLow: 10, pMid: 25, kLow: 60, kMid: 90,
+      fertN: 'ปุ๋ยยูเรีย 46-0-0 (ข้าวโพดต้องการ N สูง)',
+      fertP: 'ปุ๋ย 0-46-0 หรือหินฟอสเฟต',
+      fertK: 'ปุ๋ย 0-0-60 หรือโพแทสเซียมคลอไรด์'
+    }
+  },
+  rubber: {
+    label: 'ยางพารา',
+    icon:  '🌳',
+    moisture: { min: 30, max: 60 },    // ยางพารา — ต้องการดินระบายน้ำดี ไม่แฉะ (แนวทางรดน้ำ)
+    ph:       { min: 4.5, max: 6.5, optMin: 5.6, optMax: 6.5 },  // เล่ม 28: S1 4.5–6.5 (เหมาะ 5.6–6.5)
+    ec:       { min: 0, max: 1000 },   // <1 dS/m เหมาะสม — ยางพาราอ่อนไหวต่อความเค็มมาก
+    temp:     { min: 22, max: 35 },
+    npk: {
+      nLow: 50, pLow: 10, pMid: 25, kLow: 60, kMid: 90,
+      fertN: 'ปุ๋ย 21-0-0 (แอมโมเนียมซัลเฟต) หรือยูเรีย 46-0-0',
+      fertP: 'ปุ๋ย 0-46-0 หรือหินฟอสเฟต',
+      fertK: 'ปุ๋ย 0-0-60 หรือ 13-13-21'
+    }
+  },
+  other: {
+    label: 'อื่นๆ',
+    icon:  '🌿',
+    moisture: { min: 30, max: 80 },    // พืชทั่วไป (แนวทางรดน้ำ)
+    ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 6.5 },  // พืชส่วนใหญ่เหมาะ pH 6.0–6.5 (LDD)
+    ec:       { min: 0, max: 2000 },   // <2 dS/m เหมาะสม (เกณฑ์ความเค็มทั่วไปของ LDD)
+    temp:     { min: 15, max: 35 },
+    npk: {
+      nLow: 50, pLow: 10, pMid: 25, kLow: 60, kMid: 90,
+      fertN: 'ปุ๋ยยูเรีย 46-0-0 หรือ 21-0-0',
+      fertP: 'ปุ๋ย 0-46-0 หรือหินฟอสเฟต',
+      fertK: 'ปุ๋ย 0-0-60 หรือโพแทสเซียมคลอไรด์'
+    }
+  }
+};
+
+// ─── Crop selection ──────────────────────────────────────
+const CROP_KEY = 'agriscan_crop';
+
+function getCropKey() {
+  const k = localStorage.getItem(CROP_KEY);
+  return CROP_CRITERIA[k] ? k : 'other';
+}
+
+function getCrop() {
+  return CROP_CRITERIA[getCropKey()];
+}
+
+function changeCrop(key) {
+  if (!CROP_CRITERIA[key]) key = 'other';
+  localStorage.setItem(CROP_KEY, key);
+  syncCropUI();
+  // Re-evaluate with latest data if we have it
+  if (state.data) updateUI(state.data);
+}
+
+function syncCropUI() {
+  const sel = $('crop-select');
+  const tag = $('crop-badge');
+  if (sel) sel.value = getCropKey();
+  if (tag) tag.textContent = getCrop().icon + ' ' + getCrop().label;
+}
+
 // ─── State ────────────────────────────────────────────────
 let state = {
   data:         null,
@@ -116,44 +208,47 @@ function changeIp() {
 // ─── Update UI ────────────────────────────────────────────
 function updateUI(d) {
   state.data = d;
+  const crop = getCrop();
+  const c = crop; // shorthand
 
   // Moisture
   const m = clamp(d.moisture, 0, 100);
   setValue('val-moisture', m.toFixed(1));
   animateBar('bar-moisture', m, 100);
   const barEl = $('bar-moisture');
-  if (m < 30) {
+  if (m < c.moisture.min) {
     barEl.style.setProperty('--bar-color', '#f87171');
     barEl.style.background = 'linear-gradient(90deg,#ef4444,#f87171)';
     barEl.style.boxShadow  = '0 0 8px rgba(239,68,68,0.5)';
-    setChip('status-moisture', 'alert', '⚠ ดินแห้ง — ควรรดน้ำ');
-  } else if (m > 80) {
+    setChip('status-moisture', 'alert', `⚠ ดินแห้งเกินไป — ควรรดน้ำ (เกณฑ์ ${c.label}: ≥${c.moisture.min}%)`);
+  } else if (m > c.moisture.max) {
     barEl.style.background = 'linear-gradient(90deg,#3b82f6,#60a5fa)';
     barEl.style.boxShadow  = '0 0 8px rgba(59,130,246,0.5)';
-    setChip('status-moisture', 'warn', '💧 ชื้นเกินไป');
+    setChip('status-moisture', 'warn', `💧 ชื้นเกินไป — ระวังรากเน่า (เกณฑ์ ${c.label}: ≤${c.moisture.max}%)`);
   } else {
     barEl.style.background = 'linear-gradient(90deg,#22c55e,#4ade80)';
     barEl.style.boxShadow  = '0 0 8px rgba(34,197,94,0.5)';
-    setChip('status-moisture', 'ok', '✓ ปกติ');
+    setChip('status-moisture', 'ok', `✓ ปกติ (เกณฑ์ ${c.label}: ${c.moisture.min}–${c.moisture.max}%)`);
   }
 
   // Temperature
   setValue('val-temperature', (+d.temperature).toFixed(1));
-  if (d.temperature > 35)      setChip('status-temperature', 'alert', '🌡 ร้อนมาก');
-  else if (d.temperature < 15) setChip('status-temperature', 'warn', '❄ เย็นเกินไป');
-  else                         setChip('status-temperature', 'ok', '✓ ปกติ');
+  if (d.temperature > c.temp.max)      setChip('status-temperature', 'alert', `🌡 ร้อนเกินไป (เกณฑ์ ${c.label}: ≤${c.temp.max}°C)`);
+  else if (d.temperature < c.temp.min) setChip('status-temperature', 'warn', `❄ เย็นเกินไป (เกณฑ์ ${c.label}: ≥${c.temp.min}°C)`);
+  else                                 setChip('status-temperature', 'ok', '✓ ปกติ');
 
-  // EC
+  // EC — เกณฑ์กรมพัฒนาที่ดิน (1 dS/m = 1,000 µS/cm)
   setValue('val-ec', Math.round(d.ec));
-  if (d.ec > 2000)       setChip('status-ec', 'alert', '⚠ เกลือสูง');
-  else if (d.ec < 100)   setChip('status-ec', 'warn', '↓ EC ต่ำ');
-  else                   setChip('status-ec', 'ok', '✓ ปกติ');
+  if (d.ec > c.ec.max)       setChip('status-ec', 'alert', `⚠ เกลือสูงเกินไป — ${c.label} เหมาะกับ EC ≤${c.ec.max/1000} dS/m`);
+  else if (d.ec < c.ec.min)  setChip('status-ec', 'warn', '↓ EC ต่ำ');
+  else                       setChip('status-ec', 'ok', `✓ ปกติ (เกณฑ์ ${c.label}: ≤${c.ec.max/1000} dS/m)`);
 
-  // pH
+  // pH — เกณฑ์กรมพัฒนาที่ดิน
   setValue('val-ph', (+d.ph).toFixed(1));
-  if (d.ph < 5.5)       setChip('status-ph', 'alert', '⚠ กรดมาก');
-  else if (d.ph > 7.5)  setChip('status-ph', 'warn', '⚠ ด่างมาก');
-  else                  setChip('status-ph', 'ok', '✓ ปกติ');
+  if (d.ph < c.ph.min)            setChip('status-ph', 'alert', `⚠ กรดเกินไป (เกณฑ์ ${c.label}: pH ≥${c.ph.min})`);
+  else if (d.ph > c.ph.max)       setChip('status-ph', 'warn', `⚠ ด่างเกินไป (เกณฑ์ ${c.label}: pH ≤${c.ph.max})`);
+  else if (d.ph < c.ph.optMin || d.ph > c.ph.optMax) setChip('status-ph', 'warn', `ℹ พอใช้ได้ (เหมาะสุด pH ${c.ph.optMin}–${c.ph.optMax})`);
+  else                            setChip('status-ph', 'ok', `✓ ปกติ (เกณฑ์ ${c.label}: pH ${c.ph.min}–${c.ph.max})`);
 
   // NPK — เกณฑ์กรมพัฒนาที่ดิน (ตารางที่ 15, กองสำรวจดิน 2523)
   // P: ต่ำ <10, ปานกลาง 10–25, สูง >25 mg/kg · K: ต่ำ <60, ปานกลาง 60–90, สูง >90 mg/kg
@@ -167,11 +262,11 @@ function updateUI(d) {
   animateBar('bar-k', d.k, kMax);
 
   const npkAlerts = [], npkWarns = [];
-  if (d.n < 50)      npkAlerts.push('N ต่ำ');
-  if (d.p < 10)      npkAlerts.push('P ต่ำ');
-  else if (d.p < 25) npkWarns.push('P ปานกลาง');
-  if (d.k < 60)      npkAlerts.push('K ต่ำ');
-  else if (d.k < 90) npkWarns.push('K ปานกลาง');
+  if (d.n < c.npk.nLow)  npkAlerts.push('N ต่ำ');
+  if (d.p < c.npk.pLow)  npkAlerts.push('P ต่ำ');
+  else if (d.p < c.npk.pMid) npkWarns.push('P ปานกลาง');
+  if (d.k < c.npk.kLow)  npkAlerts.push('K ต่ำ');
+  else if (d.k < c.npk.kMid) npkWarns.push('K ปานกลาง');
   if (npkAlerts.length > 0)
     setChip('status-npk', 'warn', '⚠ ' + npkAlerts.join(' / '));
   else if (npkWarns.length > 0)
@@ -190,46 +285,53 @@ function updateUI(d) {
 // ─── Build recommendations ────────────────────────────────
 function buildRecommendations(d) {
   const recs = [];
+  const c = getCrop();
+  const ph = (+d.ph).toFixed(1);
 
-  if (d.moisture < 30) {
-    recs.push({ type:'alert', icon:'💧', title:'ดินแห้ง — ควรรดน้ำ', desc:`ความชื้นปัจจุบัน ${d.moisture.toFixed(1)}% ต่ำกว่าเกณฑ์ ควรเปิดระบบรดน้ำทันที` });
-  } else if (d.moisture > 80) {
-    recs.push({ type:'warn', icon:'🌊', title:'ดินชื้นเกินไป', desc:`ความชื้น ${d.moisture.toFixed(1)}% สูงเกินไป อาจทำให้รากเน่าได้ ควรหยุดรดน้ำ` });
+  // Moisture ตามเกณฑ์พืชที่เลือก
+  if (d.moisture < c.moisture.min) {
+    recs.push({ type:'alert', icon:'💧', title:'ดินแห้ง — ควรรดน้ำ', desc:`ความชื้น ${d.moisture.toFixed(1)}% ต่ำกว่าเกณฑ์ ${c.label} (≥${c.moisture.min}%) ควรเปิดระบบรดน้ำทันที` });
+  } else if (d.moisture > c.moisture.max) {
+    recs.push({ type:'warn', icon:'🌊', title:'ดินชื้นเกินไป', desc:`ความชื้น ${d.moisture.toFixed(1)}% สูงกว่าเกณฑ์ ${c.label} (≤${c.moisture.max}%) อาจทำให้รากเน่าได้ ควรหยุดรดน้ำและปรับปรุงการระบายน้ำ` });
   } else {
-    recs.push({ type:'ok', icon:'✅', title:'ความชื้นอยู่ในเกณฑ์ปกติ', desc:`ความชื้น ${d.moisture.toFixed(1)}% อยู่ในช่วงเหมาะสม (30–80%)` });
+    recs.push({ type:'ok', icon:'✅', title:'ความชื้นอยู่ในเกณฑ์ปกติ', desc:`ความชื้น ${d.moisture.toFixed(1)}% อยู่ในช่วงเหมาะสมของ ${c.label} (${c.moisture.min}–${c.moisture.max}%)` });
   }
 
-  if (d.ph < 5.5) {
-    recs.push({ type:'alert', icon:'🪨', title:'ดินเป็นกรดมาก', desc:`pH ${(+d.ph).toFixed(1)} ต่ำกว่าเกณฑ์ ควรใส่ปูนขาว (Lime) เพื่อปรับสภาพดิน` });
-  } else if (d.ph > 7.5) {
-    recs.push({ type:'warn', icon:'⚗️', title:'ดินเป็นด่าง', desc:`pH ${(+d.ph).toFixed(1)} สูงเกินไป ควรใส่กำมะถัน (Sulfur) เพื่อลด pH` });
+  // pH ตามเกณฑ์กรมพัฒนาที่ดินของพืช
+  if (d.ph < c.ph.min) {
+    recs.push({ type:'alert', icon:'🪨', title:'ดินเป็นกรดเกินไป', desc:`pH ${ph} ต่ำกว่าเกณฑ์ ${c.label} (pH ≥${c.ph.min}) ควรใส่ปูนขาว (Lime) หรือโดโลไมท์เพื่อปรับสภาพดิน` });
+  } else if (d.ph > c.ph.max) {
+    recs.push({ type:'warn', icon:'⚗️', title:'ดินเป็นด่างเกินไป', desc:`pH ${ph} สูงกว่าเกณฑ์ ${c.label} (pH ≤${c.ph.max}) ควรใส่กำมะถัน (Sulfur) หรือปุ๋ยอินทรีย์เพื่อลด pH` });
+  } else if (d.ph < c.ph.optMin || d.ph > c.ph.optMax) {
+    recs.push({ type:'warn', icon:'ℹ️', title:'pH พอใช้ได้แต่ไม่เหมาะที่สุด', desc:`pH ${ph} ยังอยู่ในช่วงที่ ${c.label} ขึ้นได้ แต่ช่วงเหมาะที่สุดคือ ${c.ph.optMin}–${c.ph.optMax}` });
   } else {
-    recs.push({ type:'ok', icon:'✅', title:'pH อยู่ในเกณฑ์เหมาะสม', desc:`pH ${(+d.ph).toFixed(1)} อยู่ในช่วงเหมาะสม (5.5–7.5) สำหรับพืชส่วนใหญ่` });
+    recs.push({ type:'ok', icon:'✅', title:'pH อยู่ในเกณฑ์เหมาะสม', desc:`pH ${ph} อยู่ในช่วงเหมาะที่สุดของ ${c.label} (${c.ph.optMin}–${c.ph.optMax})` });
   }
 
   // เกณฑ์ P, K อ้างอิงกรมพัฒนาที่ดิน (ตารางที่ 15) · N เป็นค่าประมาณจากเซ็นเซอร์
-  if (d.n < 50) {
-    recs.push({ type:'warn', icon:'🌿', title:'ไนโตรเจน (N) ค่อนข้างต่ำ', desc:`N = ${Math.round(d.n)} mg/kg (ค่าประมาณจากเซ็นเซอร์ — กรมฯ วัด N เป็น %) ควรใส่ปุ๋ยสูตรเน้น N เช่น 46-0-0 หรือ 21-0-0` });
+  if (d.n < c.npk.nLow) {
+    recs.push({ type:'warn', icon:'🌿', title:'ไนโตรเจน (N) ค่อนข้างต่ำ', desc:`N = ${Math.round(d.n)} mg/kg (ค่าประมาณจากเซ็นเซอร์ — กรมฯ วัด N เป็น %) ควรใส่ ${c.npk.fertN}` });
   }
 
-  if (d.p < 10) {
-    recs.push({ type:'alert', icon:'🌱', title:'ฟอสฟอรัส (P) ต่ำ', desc:`P = ${Math.round(d.p)} mg/kg ต่ำกว่าเกณฑ์กรมพัฒนาที่ดิน (<10) ควรใส่ปุ๋ยสูตรเน้น P เช่น 0-46-0 หรือหินฟอสเฟต` });
-  } else if (d.p < 25) {
-    recs.push({ type:'warn', icon:'🌱', title:'ฟอสฟอรัส (P) ปานกลาง', desc:`P = ${Math.round(d.p)} mg/kg ระดับปานกลาง (10–25) ตามเกณฑ์กรมพัฒนาที่ดิน — ยังไม่ต้องใส่ปุ๋ย` });
+  if (d.p < c.npk.pLow) {
+    recs.push({ type:'alert', icon:'🌱', title:'ฟอสฟอรัส (P) ต่ำ', desc:`P = ${Math.round(d.p)} mg/kg ต่ำกว่าเกณฑ์กรมพัฒนาที่ดิน (<${c.npk.pLow}) ควรใส่ ${c.npk.fertP}` });
+  } else if (d.p < c.npk.pMid) {
+    recs.push({ type:'warn', icon:'🌱', title:'ฟอสฟอรัส (P) ปานกลาง', desc:`P = ${Math.round(d.p)} mg/kg ระดับปานกลาง (${c.npk.pLow}–${c.npk.pMid}) ตามเกณฑ์กรมพัฒนาที่ดิน — ยังไม่ต้องใส่ปุ๋ย` });
   }
 
-  if (d.k < 60) {
-    recs.push({ type:'alert', icon:'🍂', title:'โพแทสเซียม (K) ต่ำ', desc:`K = ${Math.round(d.k)} mg/kg ต่ำกว่าเกณฑ์กรมพัฒนาที่ดิน (<60) ควรใส่ปุ๋ยสูตรเน้น K เช่น 0-0-60 หรือโพแทสเซียมคลอไรด์` });
-  } else if (d.k < 90) {
-    recs.push({ type:'warn', icon:'🍂', title:'โพแทสเซียม (K) ปานกลาง', desc:`K = ${Math.round(d.k)} mg/kg ระดับปานกลาง (60–90) ตามเกณฑ์กรมพัฒนาที่ดิน — ยังไม่ต้องใส่ปุ๋ย` });
+  if (d.k < c.npk.kLow) {
+    recs.push({ type:'alert', icon:'🍂', title:'โพแทสเซียม (K) ต่ำ', desc:`K = ${Math.round(d.k)} mg/kg ต่ำกว่าเกณฑ์กรมพัฒนาที่ดิน (<${c.npk.kLow}) ควรใส่ ${c.npk.fertK}` });
+  } else if (d.k < c.npk.kMid) {
+    recs.push({ type:'warn', icon:'🍂', title:'โพแทสเซียม (K) ปานกลาง', desc:`K = ${Math.round(d.k)} mg/kg ระดับปานกลาง (${c.npk.kLow}–${c.npk.kMid}) ตามเกณฑ์กรมพัฒนาที่ดิน — ยังไม่ต้องใส่ปุ๋ย` });
   }
 
-  if (d.ec > 2000) {
-    recs.push({ type:'alert', icon:'⚡', title:'เริ่มเป็นดินเค็ม — ระวังการใส่ปุ๋ย', desc:`EC = ${Math.round(d.ec)} µS/cm เกิน 2,000 (2 dS/m) = เริ่มเค็มเล็กน้อยตามเกณฑ์กรมพัฒนาที่ดิน ควรระวังการใส่ปุ๋ยเพิ่ม` });
+  // EC ตามความทนเค็มของพืช
+  if (d.ec > c.ec.max) {
+    recs.push({ type:'alert', icon:'⚡', title:'ดินเค็มเกินไปสำหรับ ' + c.label, desc:`EC = ${Math.round(d.ec)} µS/cm เกินเกณฑ์ ${c.label} (≤${c.ec.max/1000} dS/m) ตามกรมพัฒนาที่ดิน ควรงดใส่ปุ๋ยเคมี ล้างเกลือด้วยน้ำ หรือเลือกพันธุ์ทนเค็ม` });
   }
 
-  if (d.temperature > 35) {
-    recs.push({ type:'alert', icon:'🌡', title:'อุณหภูมิดินสูงเกินไป', desc:`${(+d.temperature).toFixed(1)}°C อาจส่งผลต่อการดูดซึมของราก ควรคลุมดินเพื่อลดความร้อน` });
+  if (d.temperature > c.temp.max) {
+    recs.push({ type:'alert', icon:'🌡', title:'อุณหภูมิดินสูงเกินไป', desc:`${(+d.temperature).toFixed(1)}°C สูงกว่าเกณฑ์ ${c.label} (≤${c.temp.max}°C) อาจส่งผลต่อการดูดซึมของราก ควรคลุมดินเพื่อลดความร้อน` });
   }
 
   const grid = $('rec-grid');
@@ -317,6 +419,7 @@ function startPolling() {
 
 // ─── Init ─────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  syncCropUI();
   startPolling();
 });
 
