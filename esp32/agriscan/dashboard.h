@@ -161,6 +161,20 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
       margin-top: 2px;
     }
 
+    .version-badge {
+      display: inline-block;
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      color: var(--green-300);
+      background: rgba(34,197,94,0.12);
+      border: 1px solid rgba(34,197,94,0.25);
+      border-radius: var(--radius-pill);
+      padding: 1px 6px;
+      margin-top: 3px;
+      width: fit-content;
+    }
+
     .header-right {
       display: flex;
       align-items: center;
@@ -739,6 +753,7 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
       <div class="header-title">
         <h1>Agriscan</h1>
         <p>Real-time Soil Sensor Dashboard</p>
+        <span class="version-badge">Ⓥ 2.1.0</span>
       </div>
     </div>
 
