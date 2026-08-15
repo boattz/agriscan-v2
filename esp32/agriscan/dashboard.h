@@ -610,15 +610,9 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
       padding: 18px 20px;
       border-radius: 14px;
       border: 1px solid transparent;
-      animation: fade-in 0.4s ease;
       transition: transform 0.2s ease;
     }
     .rec-item:hover { transform: translateX(3px); }
-    
-    @keyframes fade-in {
-      from { opacity: 0; transform: translateY(6px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
     
     .rec-item.ok      { background: rgba(34,197,94,0.06);  border-color: rgba(34,197,94,0.15);  }
     .rec-item.warn    { background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.2);  }
@@ -796,15 +790,6 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
       .card-value { font-size: clamp(2.2rem, 13vw, 2.6rem); }
       .npk-val { width: auto; }
     }
-    
-    /* ══════════════════════════════════════════════
-       Value update flash
-    ══════════════════════════════════════════════ */
-    @keyframes value-flash {
-      0%   { color: var(--green-300); text-shadow: 0 0 12px rgba(74,222,128,0.5); }
-      100% { color: var(--text-primary); text-shadow: none; }
-    }
-    .flash { animation: value-flash 0.6s ease-out; }
     
     /* ══════════════════════════════════════════════
        Mock data banner
@@ -1327,7 +1312,7 @@ function buildRecommendations(d, npk) {
   }
 
   const grid = $('rec-grid');
-  grid.innerHTML = recs.map(r => `
+  const html = recs.map(r => `
     <div class="rec-item ${r.type}">
       <span class="rec-icon">${r.icon}</span>
       <div class="rec-content">
@@ -1336,6 +1321,12 @@ function buildRecommendations(d, npk) {
       </div>
     </div>
   `).join('');
+  // เปรียบเทียบด้วย key ของคำแนะนำ (ไม่เอาเลขสุ่มในข้อความมายุ่ง) —
+  // ถ้าชุดคำแนะนำจริงไม่เปลี่ยน ก็ไม่แตะ DOM เลย (กันกระพริบ/ขยับทุก 3 วิ)
+  const key = recs.map(r => `${r.type}|${r.title}|${r.desc}`).join('');
+  if (grid.dataset.recs === key) return;
+  grid.dataset.recs = key;
+  grid.innerHTML = html;
 }
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -1345,23 +1336,20 @@ function setValue(id, val) {
   const s = String(val);
   if (el.innerHTML === s) return;   // ค่าไม่เปลี่ยน — ข้ามเขียน DOM ซ้ำ (ประหยัดทุก 3 วิ)
   el.innerHTML = s;
-  if (el.textContent !== '--') {    // ข้ามการ flash เมื่อค่าเดิมเป็น --
-    el.classList.remove('flash');
-    void el.offsetWidth; // reflow
-    el.classList.add('flash');
-  }
 }
 
 function animateBar(id, val, max) {
   const el = $(id);
   if (!el) return;
-  const pct = clamp((val / max) * 100, 0, 100);
-  el.style.width = pct + '%';
+  const pct = clamp((val / max) * 100, 0, 100) + '%';
+  if (el.style.width === pct) return;   // % ไม่เปลี่ยน — ไม่แตะ DOM (กัน reflow ทุก 3 วิ)
+  el.style.width = pct;
 }
 
 function setChip(id, type, text) {
   const el = $(id);
   if (!el) return;
+  if (el.textContent === text && el.classList.contains(type)) return;   // ค่า+สถานะไม่เปลี่ยน — ไม่แตะ DOM (กันกระพริบทุก 3 วิ)
   el.className = `card-status ${type}`;
   el.textContent = text;
 }

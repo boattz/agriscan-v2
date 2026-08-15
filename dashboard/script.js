@@ -296,7 +296,7 @@ function buildRecommendations(d, npk) {
   }
 
   const grid = $('rec-grid');
-  grid.innerHTML = recs.map(r => `
+  const html = recs.map(r => `
     <div class="rec-item ${r.type}">
       <span class="rec-icon">${r.icon}</span>
       <div class="rec-content">
@@ -305,6 +305,12 @@ function buildRecommendations(d, npk) {
       </div>
     </div>
   `).join('');
+  // เปรียบเทียบด้วย key ของคำแนะนำ (ไม่เอาเลขสุ่มในข้อความมายุ่ง) —
+  // ถ้าชุดคำแนะนำจริงไม่เปลี่ยน ก็ไม่แตะ DOM เลย (กันกระพริบ/ขยับทุก 3 วิ)
+  const key = recs.map(r => `${r.type}|${r.title}|${r.desc}`).join('');
+  if (grid.dataset.recs === key) return;
+  grid.dataset.recs = key;
+  grid.innerHTML = html;
 }
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -314,23 +320,20 @@ function setValue(id, val) {
   const s = String(val);
   if (el.innerHTML === s) return;   // ค่าไม่เปลี่ยน — ข้ามเขียน DOM ซ้ำ (ประหยัดทุก 3 วิ)
   el.innerHTML = s;
-  if (el.textContent !== '--') {    // ข้ามการ flash เมื่อค่าเดิมเป็น --
-    el.classList.remove('flash');
-    void el.offsetWidth; // reflow
-    el.classList.add('flash');
-  }
 }
 
 function animateBar(id, val, max) {
   const el = $(id);
   if (!el) return;
-  const pct = clamp((val / max) * 100, 0, 100);
-  el.style.width = pct + '%';
+  const pct = clamp((val / max) * 100, 0, 100) + '%';
+  if (el.style.width === pct) return;   // % ไม่เปลี่ยน — ไม่แตะ DOM (กัน reflow ทุก 3 วิ)
+  el.style.width = pct;
 }
 
 function setChip(id, type, text) {
   const el = $(id);
   if (!el) return;
+  if (el.textContent === text && el.classList.contains(type)) return;   // ค่า+สถานะไม่เปลี่ยน — ไม่แตะ DOM (กันกระพริบทุก 3 วิ)
   el.className = `card-status ${type}`;
   el.textContent = text;
 }

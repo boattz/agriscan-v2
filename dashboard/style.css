@@ -596,15 +596,9 @@ body::after {
   padding: 18px 20px;
   border-radius: 14px;
   border: 1px solid transparent;
-  animation: fade-in 0.4s ease;
   transition: transform 0.2s ease;
 }
 .rec-item:hover { transform: translateX(3px); }
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
 
 .rec-item.ok      { background: rgba(34,197,94,0.06);  border-color: rgba(34,197,94,0.15);  }
 .rec-item.warn    { background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.2);  }
@@ -782,15 +776,6 @@ body::after {
   .card-value { font-size: clamp(2.2rem, 13vw, 2.6rem); }
   .npk-val { width: auto; }
 }
-
-/* ══════════════════════════════════════════════
-   Value update flash
-══════════════════════════════════════════════ */
-@keyframes value-flash {
-  0%   { color: var(--green-300); text-shadow: 0 0 12px rgba(74,222,128,0.5); }
-  100% { color: var(--text-primary); text-shadow: none; }
-}
-.flash { animation: value-flash 0.6s ease-out; }
 
 /* ══════════════════════════════════════════════
    Mock data banner
