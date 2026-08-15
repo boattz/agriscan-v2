@@ -830,7 +830,7 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
       <div class="header-title">
         <h1>Agriscan</h1>
         <p>Real-time Soil Sensor Dashboard</p>
-        <span class="version-badge">Ⓥ 2.1.0</span>
+        <span class="version-badge">Ⓥ 2.2.0</span>
       </div>
     </div>
 
