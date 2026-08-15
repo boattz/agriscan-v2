@@ -7,7 +7,9 @@ const CONFIG = {
   retryDelay:   3000,
   useMockOnFail: false,   // ไม่มี mock data — แสดงข้อมูลจริงเท่านั้น
   // URL ของ backend บน Render
-  cloudApiUrl:  'https://agriscan-v2.onrender.com'
+  cloudApiUrl:  'https://agriscan-v2.onrender.com',
+  // ถ้าข้อมูลเก่ากว่านี้ (ms) ให้ถือว่า ESP32 ไม่ได้ออนไลน์อยู่ → ขึ้นสถานะ "ข้อมูลเก่า"
+  staleAfter:   30000
 };
 
 // ─── เกณฑ์พืชรายชนิด (อ้างอิงกรมพัฒนาที่ดิน) ───────────────
@@ -164,11 +166,23 @@ async function fetchData() {
       state.isMock = false;
       state.retryCount = 0;
       updateUI(json);
-      setStatus('online');
+
+      // ── ตรวจแหล่งข้อมูล + อายุข้อมูล (กันเข้าใจผิดว่า ESP32 ออนไลน์ทั้งที่ข้อมูลเก่า) ──
+      let host = '';
+      try { host = new URL(url, window.location.href).hostname; } catch (e) {}
+      const isCloud = /onrender\.com/i.test(host);
+      let age = null;
+      if (json.timestamp) {
+        const t = Date.parse(json.timestamp);
+        if (!isNaN(t)) age = Date.now() - t;
+      }
+      const stale = age !== null && age > CONFIG.staleAfter;
+
+      setStatus(stale ? 'stale' : 'online');
+      updateSourceBadge(isCloud, stale, age);
       hideBanners();
-      
+
       try {
-        const host = new URL(url, window.location.href).hostname;
         $('ip-badge').textContent = (host || 'agriscan.local') + ' ⚙';
       } catch (e) {}
 
@@ -185,6 +199,7 @@ async function fetchData() {
     state.retryCount++;
 
     setStatus('offline');
+    updateSourceBadge(null, false, null);
     showBanners();
   }
 }
@@ -379,11 +394,46 @@ function setStatus(mode) {
   badge.className = `status-badge ${mode}`;
   if (mode === 'online') {
     text.textContent = 'ออนไลน์';
+  } else if (mode === 'stale') {
+    text.textContent = 'ออนไลน์ (ข้อมูลเก่า)';
   } else if (mode === 'offline') {
     text.textContent = state.isMock ? 'ออฟไลน์ (Mock)' : 'ออฟไลน์';
   } else {
     text.textContent = 'กำลังเชื่อมต่อ...';
   }
+}
+
+// ─── แหล่งข้อมูล + อายุข้อมูล (badge แยกจากสถานะออนไลน์/ออฟไลน์) ──
+// isCloud: true = คลาวด์ Render · false = ESP32 ท้องถิ่น · null = ไม่มีข้อมูล
+function updateSourceBadge(isCloud, stale, age) {
+  const el = $('source-badge');
+  if (!el) return;
+
+  if (isCloud === null) {
+    el.className = 'source-badge';
+    el.textContent = '';
+    return;
+  }
+
+  const source = isCloud ? 'คลาวด์' : 'ESP32 ท้องถิ่น';
+  if (stale) {
+    el.className = 'source-badge stale';
+    el.textContent = `🟡 ${source} · ข้อมูลเก่า ${formatAge(age)}`;
+  } else {
+    el.className = 'source-badge fresh';
+    el.textContent = isCloud ? '☁️ คลาวด์ · ข้อมูลสด' : '🟢 ESP32 ท้องถิ่น · ข้อมูลสด';
+  }
+}
+
+function formatAge(ms) {
+  if (ms == null) return '';
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60)      return s + ' วินาที';
+  const m = Math.floor(s / 60);
+  if (m < 60)      return m + ' นาที';
+  const h = Math.floor(m / 60);
+  if (h < 24)      return h + ' ชั่วโมง';
+  return Math.floor(h / 24) + ' วัน';
 }
 
 function showBanners() {
