@@ -29,3 +29,6 @@ Thumbs.db
 
 # Local dev DB
 backend/agriscan.db
+
+.claude
+docs/
