@@ -693,13 +693,94 @@ body::after {
 }
 
 /* ══════════════════════════════════════════════
-   Responsive
+   Responsive — รองรับทุกขนาดหน้าจอ
 ══════════════════════════════════════════════ */
+
+/* ── หน้าจอกลาง / แท็บเล็ต (≤1024px) — ลดสเกลตลอดช่วง ── */
+@media (max-width: 1024px) {
+  .header-title h1 { font-size: clamp(1.35rem, 4.5vw, 1.7rem); }
+  .card-value      { font-size: clamp(2.4rem, 6.5vw, 3.2rem); }
+}
+
+/* ── มือถือ (≤600px) — ปรับสเกลให้กระชับ แตะง่าย ── */
 @media (max-width: 600px) {
-  .header { flex-direction: column; align-items: flex-start; }
-  .header-right { width: 100%; justify-content: space-between; }
-  .cards-grid { grid-template-columns: 1fr; }
-  .rec-grid { grid-template-columns: 1fr; }
+  .page-wrapper { padding: 0 12px 32px; }
+
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 20px 0 18px;
+    margin-bottom: 22px;
+  }
+  .header-left { gap: 14px; }
+  .logo-wrap { width: 52px; height: 52px; }
+  .logo-wrap svg { width: 28px; height: 28px; }
+  .header-title h1 { font-size: 1.45rem; }
+  .header-title p { font-size: 0.85rem; }
+  .version-badge { font-size: 0.68rem; padding: 3px 9px; }
+
+  .header-right { width: 100%; justify-content: space-between; gap: 10px; }
+  .status-badge { padding: 8px 16px; font-size: 0.85rem; gap: 8px; }
+  .status-dot { width: 9px; height: 9px; }
+  .last-update { font-size: 0.84rem; }
+  .ip-badge { font-size: 0.84rem; padding: 6px 14px; }
+  .source-badge { font-size: 0.84rem; padding: 6px 14px; }
+
+  .connecting-banner { padding: 14px 18px; gap: 12px; margin-bottom: 16px; }
+  .connecting-banner p { font-size: 0.95rem; }
+  .connecting-banner small { font-size: 0.8rem; }
+
+  .cards-grid { grid-template-columns: 1fr; gap: 14px; margin-bottom: 20px; }
+  .card { padding: 22px 18px 18px; }
+  .card-header { margin-bottom: 14px; }
+  .card-label { font-size: 0.9rem; }
+  .card-icon { width: 40px; height: 40px; }
+  .card-icon svg { width: 20px; height: 20px; }
+  .card-value { font-size: clamp(2.4rem, 12vw, 3rem); }
+  .card-unit { font-size: 0.95rem; margin-left: 4px; }
+  .card-status { font-size: 0.86rem; padding: 5px 12px; margin-top: 12px; }
+
+  .moisture-bar-wrap { margin-top: 14px; }
+  .moisture-bar-track { height: 10px; }
+  .moisture-labels span { font-size: 0.76rem; }
+
+  .npk-bars { margin-top: 14px; gap: 12px; }
+  .npk-label { font-size: 0.88rem; width: 18px; }
+  .npk-track { height: 8px; }
+  .npk-val { font-size: 0.86rem; width: 52px; }
+
+  .crop-selector {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px 16px;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .crop-selector-label { font-size: 0.95rem; }
+  .crop-selector-controls { flex-direction: column; align-items: stretch; gap: 10px; }
+  .crop-selector select { width: 100%; font-size: 0.95rem; padding: 12px 44px 12px 16px; }
+  .crop-badge { font-size: 0.9rem; padding: 8px 14px; text-align: center; }
+  .crop-selector-hint { font-size: 0.8rem; }
+
+  .section-title { font-size: 0.9rem; margin-bottom: 14px; }
+  .rec-grid { grid-template-columns: 1fr; gap: 12px; }
+  .rec-item { padding: 14px 16px; gap: 12px; }
+  .rec-icon { font-size: 1.3rem; }
+  .rec-title { font-size: 0.95rem; }
+  .rec-desc { font-size: 0.88rem; line-height: 1.5; }
+
+  .footer { margin-top: 28px; }
+  .footer p { font-size: 0.8rem; }
+  .btn-refresh { font-size: 0.9rem; padding: 10px 16px; }
+
+  .mock-banner { padding: 10px 16px; font-size: 0.86rem; }
+}
+
+/* ── จอเล็กพิเศษ (≤380px) — กันล้นขอบ ── */
+@media (max-width: 380px) {
+  .card-value { font-size: clamp(2.2rem, 13vw, 2.6rem); }
+  .npk-val { width: auto; }
 }
 
 /* ══════════════════════════════════════════════
