@@ -779,6 +779,20 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
         <option value="rice">🌾 ข้าว</option>
         <option value="corn">🌽 ข้าวโพด</option>
         <option value="rubber">🌳 ยางพารา</option>
+        <option value="longan">🍇 ลำไย</option>
+        <option value="lychee">🍒 ลิ้นจี่</option>
+        <option value="durian">🟢 ทุเรียน</option>
+        <option value="mangosteen">🟣 มังคุด</option>
+        <option value="cassava">🌱 มันสำปะหลัง</option>
+        <option value="potato">🥔 มันฝรั่ง</option>
+        <option value="onion">🧅 หอมหัวใหญ่</option>
+        <option value="garlic">🧄 กระเทียม</option>
+        <option value="jujube">🍏 พุทรา</option>
+        <option value="watermelon">🍉 แตงโม</option>
+        <option value="pumpkin">🎃 ฟักทอง</option>
+        <option value="vegetables">🥬 ผักสวนครัว</option>
+        <option value="pomelo">🍊 ส้มโอ</option>
+        <option value="guava">🍐 ฝรั่ง</option>
         <option value="other">🌿 อื่นๆ</option>
       </select>
       <span class="crop-badge" id="crop-badge">🌿 อื่นๆ</span>
@@ -936,20 +950,7 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
      JavaScript
 ════════════════════════════════════════════ -->
 <script>
-'use strict';
-
-// ─── Config ───────────────────────────────────────────────
-const CONFIG = {
-  apiUrl:       '/data',
-  interval:     3000,
-  maxRetry:     999,
-  retryDelay:   3000,
-  useMockOnFail: false,   // ไม่มี mock data — แสดงข้อมูลจริงเท่านั้น
-  // ถ้าข้อมูลเก่ากว่านี้ (ms) ให้ถือว่า ESP32 ไม่ได้ออนไลน์อยู่ → ขึ้นสถานะ "ข้อมูลเก่า"
-  staleAfter:   30000
-};
-
-// ─── เกณฑ์พืชรายชนิด (อ้างอิงกรมพัฒนาที่ดิน) ───────────────
+// ── เกณฑ์พืชรายชนิด (สอดคล้องกับ dashboard/crops.js) ──
 // ที่มา: ศักยภาพการให้ผลผลิตพืชเศรษฐกิจของชุดดินในประเทศไทย (สำนักสำรวจและวิจัยทรัพยากรดิน, กรมพัฒนาที่ดิน)
 // ตารางที่ 3 (ข้าว) และตารางที่ 4 (ข้าวโพด) — ดัดแปลงจากบัณฑิตและคำรณ (2542)
 // ยางพารา: คู่มือการจำแนกความเหมาะสมของดินสำหรับพืชเศรษฐกิจ (เอกสารวิชาการ เล่ม 28, กองสำรวจและจำแนกดิน)
@@ -967,50 +968,40 @@ const NPK_DEFAULT = {
 };
 
 const CROP_CRITERIA = {
-  rice: {
-    label: 'ข้าว',
-    icon:  '🌾',
-    moisture: { min: 60, max: 100 },   // นาข้าว — ดินควรชื้นถึงแฉะ (แนวทางรดน้ำ)
-    ph:       { min: 4.0, max: 8.4, optMin: 5.6, optMax: 7.3 },  // LDD ตาราง 3: S1 5.6–7.3, S2 5.1–5.5/7.4–7.8, S3 4.0–5.0/7.8–8.4
-    ec:       { max: 2 },              // 2 dS/m = 2,000 µS/cm (LDD ตาราง 3: S1 <2 dS/m)
-    temp:     { min: 18, max: 35 },
-    npk: { ...NPK_DEFAULT }
-  },
-  corn: {
-    label: 'ข้าวโพด',
-    icon:  '🌽',
-    moisture: { min: 50, max: 80 },    // ข้าวโพด — ชื้นสม่ำเสมอ ไม่แฉะ (แนวทางรดน้ำ)
-    ph:       { min: 4.0, max: 8.4, optMin: 5.1, optMax: 7.3 },  // LDD ตาราง 4: S1 5.1–7.3, S2 4.5–5.0/7.4–7.8, S3 4.0–4.4/7.9–8.4
-    ec:       { max: 2 },              // 2 dS/m (LDD ตาราง 4: S1 <2 dS/m)
-    temp:     { min: 16, max: 35 },
-    npk: { ...NPK_DEFAULT,
-      nLow: 60,                        // ข้าวโพดต้องการ N สูงกว่าพืชอื่น
-      fertN: 'ปุ๋ยยูเรีย 46-0-0 (ข้าวโพดต้องการ N สูง)' }
-  },
-  rubber: {
-    label: 'ยางพารา',
-    icon:  '🌳',
-    moisture: { min: 30, max: 60 },    // ยางพารา — ต้องการดินระบายน้ำดี ไม่แฉะ (แนวทางรดน้ำ)
-    ph:       { min: 4.5, max: 6.5, optMin: 5.6, optMax: 6.5 },  // เล่ม 28: S1 4.5–6.5 (เหมาะ 5.6–6.5)
-    ec:       { max: 1 },              // 1 dS/m = 1,000 µS/cm — ยางพาราอ่อนไหวต่อความเค็มมาก
-    temp:     { min: 22, max: 35 },
-    npk: { ...NPK_DEFAULT,
-      fertN: 'ปุ๋ย 21-0-0 (แอมโมเนียมซัลเฟต) หรือยูเรีย 46-0-0',
-      fertK: 'ปุ๋ย 0-0-60 หรือ 13-13-21' }
-  },
-  other: {
-    label: 'อื่นๆ',
-    icon:  '🌿',
-    moisture: { min: 30, max: 80 },    // พืชทั่วไป (แนวทางรดน้ำ)
-    ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 6.5 },  // พืชส่วนใหญ่เหมาะ pH 6.0–6.5 (LDD)
-    ec:       { max: 2 },              // 2 dS/m (เกณฑ์ความเค็มทั่วไปของ LDD)
-    temp:     { min: 15, max: 35 },
-    npk: { ...NPK_DEFAULT }
-  }
+  rice: { label:'ข้าว', icon:'🌾', moisture:{min:60,max:100}, ph:{min:4.0,max:8.4,optMin:5.6,optMax:7.3}, ec:{max:2}, temp:{min:18,max:35}, npk:{...NPK_DEFAULT} },
+  corn: { label:'ข้าวโพด', icon:'🌽', moisture:{min:50,max:80}, ph:{min:4.0,max:8.4,optMin:5.1,optMax:7.3}, ec:{max:2}, temp:{min:16,max:35}, npk:{...NPK_DEFAULT, nLow:60, fertN:'ปุ๋ยยูเรีย 46-0-0 (ข้าวโพดต้องการ N สูง)'} },
+  rubber:{ label:'ยางพารา', icon:'🌳', moisture:{min:30,max:60}, ph:{min:4.5,max:6.5,optMin:5.6,optMax:6.5}, ec:{max:1}, temp:{min:22,max:35}, npk:{...NPK_DEFAULT, fertN:'ปุ๋ย 21-0-0 (แอมโมเนียมซัลเฟต) หรือยูเรีย 46-0-0', fertK:'ปุ๋ย 0-0-60 หรือ 13-13-21'} },
+  other: { label:'อื่นๆ', icon:'🌿', moisture:{min:30,max:80}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:6.5}, ec:{max:2}, temp:{min:15,max:35}, npk:{...NPK_DEFAULT} },
+  longan:{ label:'ลำไย', icon:'🍇', moisture:{min:30,max:60}, ph:{min:5.0,max:6.5,optMin:5.5,optMax:6.3}, ec:{max:1}, temp:{min:18,max:35}, npk:{...NPK_DEFAULT} },
+  lychee:{ label:'ลิ้นจี่', icon:'🍒', moisture:{min:40,max:80}, ph:{min:4.5,max:6.5,optMin:5.0,optMax:6.0}, ec:{max:1}, temp:{min:15,max:35}, npk:{...NPK_DEFAULT} },
+  durian:{ label:'ทุเรียน', icon:'🟢', moisture:{min:50,max:90}, ph:{min:5.0,max:6.5,optMin:5.5,optMax:6.5}, ec:{max:1}, temp:{min:24,max:33}, npk:{...NPK_DEFAULT} },
+  cassava:{ label:'มันสำปะหลัง', icon:'🌱', moisture:{min:30,max:70}, ph:{min:4.5,max:7.5,optMin:5.5,optMax:6.5}, ec:{max:3}, temp:{min:20,max:35}, npk:{...NPK_DEFAULT, nLow:40} },
+  potato:{ label:'มันฝรั่ง', icon:'🥔', moisture:{min:50,max:80}, ph:{min:5.0,max:7.0,optMin:5.2,optMax:6.0}, ec:{max:2}, temp:{min:15,max:28}, npk:{...NPK_DEFAULT, kLow:70} },
+  onion: { label:'หอมหัวใหญ่', icon:'🧅', moisture:{min:50,max:85}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:1}, temp:{min:13,max:25}, npk:{...NPK_DEFAULT} },
+  garlic:{ label:'กระเทียม', icon:'🧄', moisture:{min:45,max:80}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:1}, temp:{min:12,max:24}, npk:{...NPK_DEFAULT} },
+  mangosteen:{ label:'มังคุด', icon:'🟣', moisture:{min:50,max:90}, ph:{min:5.0,max:6.5,optMin:5.5,optMax:6.5}, ec:{max:1}, temp:{min:22,max:33}, npk:{...NPK_DEFAULT} },
+  jujube:{ label:'พุทรา', icon:'🍏', moisture:{min:40,max:70}, ph:{min:5.0,max:8.0,optMin:6.0,optMax:7.0}, ec:{max:2}, temp:{min:18,max:35}, npk:{...NPK_DEFAULT} },
+  watermelon:{ label:'แตงโม', icon:'🍉', moisture:{min:50,max:80}, ph:{min:5.0,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:2}, temp:{min:20,max:35}, npk:{...NPK_DEFAULT} },
+  pumpkin:{ label:'ฟักทอง', icon:'🎃', moisture:{min:40,max:75}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:2}, temp:{min:18,max:32}, npk:{...NPK_DEFAULT} },
+  vegetables:{ label:'ผักสวนครัว', icon:'🥬', moisture:{min:50,max:85}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:1}, temp:{min:15,max:32}, npk:{...NPK_DEFAULT} },
+  pomelo:{ label:'ส้มโอ', icon:'🍊', moisture:{min:40,max:75}, ph:{min:5.0,max:6.5,optMin:5.5,optMax:6.5}, ec:{max:1}, temp:{min:20,max:35}, npk:{...NPK_DEFAULT} },
+  guava: { label:'ฝรั่ง', icon:'🍐', moisture:{min:40,max:75}, ph:{min:5.0,max:7.0,optMin:5.5,optMax:6.5}, ec:{max:2}, temp:{min:20,max:35}, npk:{...NPK_DEFAULT} }
 };
 
-// ─── มาตราสเกตบาร์ NPK (อิงช่วง ต่ำ/ปานกลาง/สูง ของ LDD ตาราง 15) ──
+// ── มาตราสเกตบาร์ NPK (อิงช่วง ต่ำ/ปานกลาง/สูง ของ LDD ตาราง 15) ──
 const NPK_BAR_MAX = { n: 200, p: 50, k: 150 };
+'use strict';
+
+// ─── Config ───────────────────────────────────────────────
+const CONFIG = {
+  apiUrl:       '/data',
+  interval:     3000,
+  maxRetry:     999,
+  retryDelay:   3000,
+  useMockOnFail: false,   // ไม่มี mock data — แสดงข้อมูลจริงเท่านั้น
+  // ถ้าข้อมูลเก่ากว่านี้ (ms) ให้ถือว่า ESP32 ไม่ได้ออนไลน์อยู่ → ขึ้นสถานะ "ข้อมูลเก่า"
+  staleAfter:   30000
+};
 
 // ─── Crop selection ──────────────────────────────────────
 const CROP_KEY = 'agriscan_crop';
