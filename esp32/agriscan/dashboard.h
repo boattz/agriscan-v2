@@ -950,12 +950,12 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
      JavaScript
 ════════════════════════════════════════════ -->
 <script>
-// ── เกณฑ์พืชรายชนิด (สอดคล้องกับ dashboard/crops.js) ──
+// ── เกณฑ์พืชรายชนิด (ค่าเดียวกับ dashboard/crops.js — รายละเอียด src/conf ดูในไฟล์นั้น) ──
 // ที่มา: ศักยภาพการให้ผลผลิตพืชเศรษฐกิจของชุดดินในประเทศไทย (สำนักสำรวจและวิจัยทรัพยากรดิน, กรมพัฒนาที่ดิน)
-// ตารางที่ 3 (ข้าว) และตารางที่ 4 (ข้าวโพด) — ดัดแปลงจากบัณฑิตและคำรณ (2542)
-// ยางพารา: คู่มือการจำแนกความเหมาะสมของดินสำหรับพืชเศรษฐกิจ (เอกสารวิชาการ เล่ม 28, กองสำรวจและจำแนกดิน)
-// pH: min/max = ขอบเขตยังปลูกได้ (S3) · optMin/optMax = ช่วงเหมาะสมสูงสุด (S1)
-// EC: max = dS/m ของความเค็มสูงสุดที่พืชทนได้ (1 dS/m = 1,000 µS/cm)
+// ตารางที่ 3 (ข้าว) ตารางที่ 4 (ข้าวโพด) ตารางที่ 5 (มันสำปะหลัง) — ดัดแปลงจากบัณฑิตและคำรณ (2542)
+// ไม้ผล/ยางพารา: คู่มือการจำแนกความเหมาะสมของดินสำหรับพืชเศรษฐกิจ (เล่ม 28, กองสำรวจและจำแนกดิน) — ครอบคลุมเฉพาะไม้ผล
+// pH: min/max = ขอบเขตยังขึ้นได้ (S3) · optMin/optMax = ช่วงเหมาะสมสูงสุด (S1)
+// EC: max = dS/m ที่ผลผลิตยังไม่ลดลง (FAO 29, ตารางที่ 4 — ECe 0%) · 1 dS/m = 1,000 µS/cm
 // อุณหภูมิ: min/max = ขอบเขตที่ยังขึ้นได้ · ความชื้น (%) เป็นแนวทางรดน้ำ (LDD ใช้ mm/ฤดู)
 // N/P/K thresholds + ปุ๋ยแนะนำ: default ร่วม (NPK_DEFAULT) — พืชไหนต่างจาก default แก้เฉพาะค่าในพืชนั้น
 const NPK_DEFAULT = {
@@ -968,19 +968,19 @@ const NPK_DEFAULT = {
 };
 
 const CROP_CRITERIA = {
-  rice: { label:'ข้าว', icon:'🌾', moisture:{min:60,max:100}, ph:{min:4.0,max:8.4,optMin:5.6,optMax:7.3}, ec:{max:2}, temp:{min:18,max:35}, npk:{...NPK_DEFAULT} },
-  corn: { label:'ข้าวโพด', icon:'🌽', moisture:{min:50,max:80}, ph:{min:4.0,max:8.4,optMin:5.1,optMax:7.3}, ec:{max:2}, temp:{min:16,max:35}, npk:{...NPK_DEFAULT, nLow:60, fertN:'ปุ๋ยยูเรีย 46-0-0 (ข้าวโพดต้องการ N สูง)'} },
+  rice: { label:'ข้าว', icon:'🌾', moisture:{min:60,max:100}, ph:{min:4.0,max:8.4,optMin:5.6,optMax:7.3}, ec:{max:3.0}, temp:{min:18,max:35}, npk:{...NPK_DEFAULT} },
+  corn: { label:'ข้าวโพด', icon:'🌽', moisture:{min:50,max:80}, ph:{min:4.0,max:8.4,optMin:5.1,optMax:7.3}, ec:{max:1.7}, temp:{min:16,max:35}, npk:{...NPK_DEFAULT, nLow:60, fertN:'ปุ๋ยยูเรีย 46-0-0 (ข้าวโพดต้องการ N สูง)'} },
   rubber:{ label:'ยางพารา', icon:'🌳', moisture:{min:30,max:60}, ph:{min:4.5,max:6.5,optMin:5.6,optMax:6.5}, ec:{max:1}, temp:{min:22,max:35}, npk:{...NPK_DEFAULT, fertN:'ปุ๋ย 21-0-0 (แอมโมเนียมซัลเฟต) หรือยูเรีย 46-0-0', fertK:'ปุ๋ย 0-0-60 หรือ 13-13-21'} },
   other: { label:'อื่นๆ', icon:'🌿', moisture:{min:30,max:80}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:6.5}, ec:{max:2}, temp:{min:15,max:35}, npk:{...NPK_DEFAULT} },
   longan:{ label:'ลำไย', icon:'🍇', moisture:{min:30,max:60}, ph:{min:5.0,max:6.5,optMin:5.5,optMax:6.3}, ec:{max:1}, temp:{min:18,max:35}, npk:{...NPK_DEFAULT} },
   lychee:{ label:'ลิ้นจี่', icon:'🍒', moisture:{min:40,max:80}, ph:{min:4.5,max:6.5,optMin:5.0,optMax:6.0}, ec:{max:1}, temp:{min:15,max:35}, npk:{...NPK_DEFAULT} },
   durian:{ label:'ทุเรียน', icon:'🟢', moisture:{min:50,max:90}, ph:{min:5.0,max:6.5,optMin:5.5,optMax:6.5}, ec:{max:1}, temp:{min:24,max:33}, npk:{...NPK_DEFAULT} },
-  cassava:{ label:'มันสำปะหลัง', icon:'🌱', moisture:{min:30,max:70}, ph:{min:4.5,max:7.5,optMin:5.5,optMax:6.5}, ec:{max:3}, temp:{min:20,max:35}, npk:{...NPK_DEFAULT, nLow:40} },
-  potato:{ label:'มันฝรั่ง', icon:'🥔', moisture:{min:50,max:80}, ph:{min:5.0,max:7.0,optMin:5.2,optMax:6.0}, ec:{max:2}, temp:{min:15,max:28}, npk:{...NPK_DEFAULT, kLow:70} },
-  onion: { label:'หอมหัวใหญ่', icon:'🧅', moisture:{min:50,max:85}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:1}, temp:{min:13,max:25}, npk:{...NPK_DEFAULT} },
+  cassava:{ label:'มันสำปะหลัง', icon:'🌱', moisture:{min:30,max:70}, ph:{min:4.5,max:7.5,optMin:5.5,optMax:6.5}, ec:{max:1.0}, temp:{min:20,max:35}, npk:{...NPK_DEFAULT, nLow:40} },
+  potato:{ label:'มันฝรั่ง', icon:'🥔', moisture:{min:50,max:80}, ph:{min:5.0,max:7.0,optMin:5.2,optMax:6.0}, ec:{max:1.7}, temp:{min:15,max:28}, npk:{...NPK_DEFAULT, kLow:70} },
+  onion: { label:'หอมหัวใหญ่', icon:'🧅', moisture:{min:50,max:85}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:1.2}, temp:{min:13,max:25}, npk:{...NPK_DEFAULT} },
   garlic:{ label:'กระเทียม', icon:'🧄', moisture:{min:45,max:80}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:1}, temp:{min:12,max:24}, npk:{...NPK_DEFAULT} },
   mangosteen:{ label:'มังคุด', icon:'🟣', moisture:{min:50,max:90}, ph:{min:5.0,max:6.5,optMin:5.5,optMax:6.5}, ec:{max:1}, temp:{min:22,max:33}, npk:{...NPK_DEFAULT} },
-  jujube:{ label:'พุทรา', icon:'🍏', moisture:{min:40,max:70}, ph:{min:5.0,max:8.0,optMin:6.0,optMax:7.0}, ec:{max:2}, temp:{min:18,max:35}, npk:{...NPK_DEFAULT} },
+  jujube:{ label:'พุทรา', icon:'🍏', moisture:{min:40,max:70}, ph:{min:5.0,max:8.0,optMin:6.0,optMax:7.0}, ec:{max:2}, temp:{min:18,max:45}, npk:{...NPK_DEFAULT} },
   watermelon:{ label:'แตงโม', icon:'🍉', moisture:{min:50,max:80}, ph:{min:5.0,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:2}, temp:{min:20,max:35}, npk:{...NPK_DEFAULT} },
   pumpkin:{ label:'ฟักทอง', icon:'🎃', moisture:{min:40,max:75}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:2}, temp:{min:18,max:32}, npk:{...NPK_DEFAULT} },
   vegetables:{ label:'ผักสวนครัว', icon:'🥬', moisture:{min:50,max:85}, ph:{min:5.5,max:7.5,optMin:6.0,optMax:7.0}, ec:{max:1}, temp:{min:15,max:32}, npk:{...NPK_DEFAULT} },
