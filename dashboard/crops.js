@@ -10,7 +10,11 @@
 //   ※ มันสำปะหลัง/มันฝรั่ง/หอม/กระเทียม/แตงโม/ฟักทอง/ผักสวนครัว: ไม่มีใน LDD ตาราง/เล่ม 28 —
 //   อ้างค่าจากเอกสารวิชาการทั่วไป (เน้นปลอดภัย) เรื่องแหล่งอ้างอิงฉบับเต็มใน docs/crop-sources.md
 // อุณหภูมิ: min/max = ขอบเขตที่ยังขึ้นได้ · ความชื้น (%) เป็นแนวทางรดน้ำ (LDD ใช้ mm/ฤดู)
-// N/P/K thresholds + ปุ๋ยแนะนำ: default ร่วม (NPK_DEFAULT) — พืชไหนต่างจาก default แก้เฉพาะค่าในพืชนั้น
+// N/P/K thresholds: baseline = LDD ตาราง 15 (ระดับธาตุในดิน: P ต่ำ <10 / กลาง 10–25 · K ต่ำ <60 / กลาง 60–90 mg/kg)
+//   แต่ปรับแยกรายพืชตามความต้องการธาตุของแต่ละชนิด (ข้าวโพด/หอม/กระเทียม/ผัก N สูง · มันสำปะหลัง/ทุเรียน/มันฝรั่ง
+//   K สูง · มันสำปะหลังทน N ต่ำ ฯลฯ — อ้างอิงคำแนะนำปุ๋ยรายพืช กรมวิชาการเกษตร/DOAE) — ค่าเป็นแนวทางโดยประมาณ
+// โครงสร้าง npk: spread จาก NPK_DEFAULT (ค่า base) ก่อน แล้วทับด้วยค่าเฉพาะพืช
+// ปุ๋ยแนะนำ (fertN/fertP/fertK): default ร่วม — พืชไหนต่างจาก default แก้เฉพาะค่าในพืชนั้น
 const NPK_DEFAULT = {
   nLow: 50,   // N ต่ำ (ค่าประมาณจากเซ็นเซอร์ — กรมฯ วัด N เป็น % ไม่มีเกณฑ์ mg/kg)
   pLow: 10, pMid: 25,   // P ต่ำ/ปานกลาง mg/kg (LDD ตาราง 15)
@@ -28,27 +32,35 @@ const CROP_CRITERIA = {
     ph:       { min: 4.0, max: 8.4, optMin: 5.6, optMax: 7.3 },  // LDD ตาราง 3: S1 5.6–7.3, S2 5.1–5.5/7.4–7.8, S3 4.0–5.0/7.8–8.4
     ec:       { max: 2 },              // 2 dS/m = 2,000 µS/cm (LDD ตาราง 3: S1 <2 dS/m — เหมาะสูงสุด)
     temp:     { min: 18, max: 35 },
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 50, pLow: 10, pMid: 25,   // ข้าว — baseline LDD ตาราง 15 (ระดับธาตุในดิน)
+      kLow: 60, kMid: 90 }
   },
   corn: {
     label: 'ข้าวโพด',
     icon:  '🌽',
     moisture: { min: 50, max: 80 },    // ข้าวโพด — ชื้นสม่ำเสมอ ไม่แฉะ (แนวทางรดน้ำ)
-    ph:       { min: 4.0, max: 8.4, optMin: 5.1, optMax: 7.3 },  // LDD ตาราง 4: S1 5.1–7.3, S2 4.5–5.0/7.4–7.8, S3 4.0–4.4/7.9–8.4
+    ph:       { min: 4.0, max: 7.8, optMin: 5.1, optMax: 7.3 },  // LDD ตาราง 4: S1 5.1–7.3, S2 4.5–5.0/7.4–7.8 — เดิม max 8.4 (ลอกตารางข้าว) ปรับเป็น 7.8: ข้าวโพดทนด่างน้อยกว่าข้าว
     ec:       { max: 2 },              // 2 dS/m (LDD ตาราง 4: S1 <2 dS/m — เหมาะสูงสุด)
     temp:     { min: 16, max: 35 },
-    npk: { ...NPK_DEFAULT,
-      nLow: 60,                        // ข้าวโพดต้องการ N สูงกว่าพืชอื่น
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 70, pLow: 15, pMid: 30,   // ข้าวโพด — ต้องการ N/P/K สูง
+      kLow: 90, kMid: 120,
       fertN: 'ปุ๋ยยูเรีย 46-0-0 (ข้าวโพดต้องการ N สูง)' }
   },
   rubber: {
     label: 'ยางพารา',
     icon:  '🌳',
     moisture: { min: 30, max: 60 },    // ยางพารา — ต้องการดินระบายน้ำดี ไม่แฉะ (แนวทางรดน้ำ)
-    ph:       { min: 4.5, max: 6.5, optMin: 5.6, optMax: 6.5 },  // เล่ม 28: เหมาะ pH 5.5–6.5, ขึ้นได้ 4.5–6.5
+    ph:       { min: 4.5, max: 6.5, optMin: 5.5, optMax: 6.5 },  // เล่ม 28: เหมาะ pH 5.5–6.5, ขึ้นได้ 4.5–6.5
     ec:       { max: 1 },              // 1 dS/m = 1,000 µS/cm — ยางพาราอ่อนไหวต่อความเค็มมาก (เล่ม 28/งานวิจัยกรมฯ <1)
     temp:     { min: 22, max: 35 },
-    npk: { ...NPK_DEFAULT,
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 40, pLow: 10, pMid: 25,   // ยางพารา — N พอประมาณ, K สำคัญต่อน้ำยาง
+      kLow: 70, kMid: 100,
       fertN: 'ปุ๋ย 21-0-0 (แอมโมเนียมซัลเฟต) หรือยูเรีย 46-0-0',
       fertK: 'ปุ๋ย 0-0-60 หรือ 13-13-21' }
   },
@@ -59,7 +71,10 @@ const CROP_CRITERIA = {
     ph:       { min: 5.0, max: 6.5, optMin: 5.5, optMax: 6.3 },  // LDD เล่ม 28 (ลำไย): S1 5.5–6.3, S2–S3 5.0–6.5
     ec:       { max: 1 },              // <1 dS/m — ลำไยอ่อนไหวต่อความเค็ม
     temp:     { min: 18, max: 35 },
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 40, pLow: 10, pMid: 25,   // ลำไย — ไม้ผล ต้องการ K สูง
+      kLow: 70, kMid: 100 }
   },
   lychee: {
     label: 'ลิ้นจี่',
@@ -68,7 +83,10 @@ const CROP_CRITERIA = {
     ph:       { min: 4.5, max: 6.5, optMin: 5.0, optMax: 6.0 },  // LDD เล่ม 28 (ลิ้นจี่): S1 5.0–6.0, S2–S3 4.5–6.5
     ec:       { max: 1 },              // <1 dS/m — ลิ้นจี่อ่อนไหวต่อความเค็ม
     temp:     { min: 15, max: 35 },
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 40, pLow: 10, pMid: 25,   // ลิ้นจี่ — ไม้ผล ต้องการ K สูง
+      kLow: 70, kMid: 100 }
   },
   durian: {
     label: 'ทุเรียน',
@@ -77,7 +95,10 @@ const CROP_CRITERIA = {
     ph:       { min: 5.0, max: 6.5, optMin: 5.5, optMax: 6.5 },  // LDD เล่ม 28 (ทุเรียน): S1 5.5–6.5, S2–S3 5.0–6.5
     ec:       { max: 1 },              // <1 dS/m — ทุเรียนอ่อนไหวต่อความเค็มมาก
     temp:     { min: 24, max: 33 },    // ทุเรียนชอบร้อนชื้น 24–33°C
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 50, pLow: 12, pMid: 30,   // ทุเรียน — ต้องการ K สูงมาก
+      kLow: 90, kMid: 130 }
   },
   cassava: {
     label: 'มันสำปะหลัง',
@@ -86,8 +107,10 @@ const CROP_CRITERIA = {
     ph:       { min: 4.5, max: 7.5, optMin: 5.5, optMax: 6.5 },  // LDD ตาราง 5 (มันสำปะหลัง): S1 5.5–6.5, S2–S3 4.5–7.5
     ec:       { max: 1.0 },            // ~1 dS/m — ไม่มีใน LDD: มันสำปะหลังทนเค็มต่ำ (อ่อนไหว) ※แก้จากเดิม 3
     temp:     { min: 20, max: 35 },    // อุณหภูมิเหมาะ 25–35°C
-    npk: { ...NPK_DEFAULT,
-      nLow: 40 }                       // มันสำปะหลังทนดินขาด N ได้ดีกว่า
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 35, pLow: 12, pMid: 30,   // มันสำปะหลัง — ทน N ต่ำ, ต้องการ K สูง
+      kLow: 90, kMid: 130, }                       // มันสำปะหลังทนดินขาด N ได้ดีกว่า
   },
   potato: {
     label: 'มันฝรั่ง',
@@ -96,17 +119,22 @@ const CROP_CRITERIA = {
     ph:       { min: 5.0, max: 7.0, optMin: 5.2, optMax: 6.0 },  // เอกสารวิชาการ (CIP): S1 5.2–6.0, S3 5.0–7.0 ※ไม่ใช่เล่ม 28 (ครอบคลุมไม้ผล)
     ec:       { max: 2 },              // <2 dS/m (เอกสารวิชาการ/DOAE)
     temp:     { min: 15, max: 28 },    // มันฝรั่งไม่ชอบร้อน 15–28°C
-    npk: { ...NPK_DEFAULT,
-      kLow: 70 }                       // มันฝรั่งต้องการ K สูง
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 55, pLow: 15, pMid: 35,   // มันฝรั่ง — ต้องการ P/K สูง
+      kLow: 90, kMid: 130, }                       // มันฝรั่งต้องการ K สูง
   },
   onion: {
     label: 'หอมหัวใหญ่',
     icon:  '🧅',
     moisture: { min: 50, max: 85 },    // ต้องการน้ำสม่ำเสมอ (แนวทางรดน้ำ)
-    ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 7.0 },  // AVRDC/งานวิชาการ: เหมาะ 6.0–6.8 ※ไม่ใช่เล่ม 28
+    ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 6.8 },  // AVRDC/งานวิชาการ: เหมาะ 6.0–6.8 ※ไม่ใช่เล่ม 28
     ec:       { max: 1 },              // <1 dS/m — หอมอ่อนไหวต่อความเค็ม
     temp:     { min: 13, max: 25 },    // หอมชอบอากาศเย็น 13–25°C
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 60, pLow: 15, pMid: 30,   // หอมหัวใหญ่ — ต้องการธาตุสูง
+      kLow: 80, kMid: 120 }
   },
   garlic: {
     label: 'กระเทียม',
@@ -115,7 +143,10 @@ const CROP_CRITERIA = {
     ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 7.0 },  // เอกสารวิชาการ (คล้ายหอม): เหมาะ 6.0–7.0 ※ไม่ใช่เล่ม 28
     ec:       { max: 1 },              // <1 dS/m — กระเทียมอ่อนไหวต่อความเค็ม
     temp:     { min: 12, max: 24 },    // กระเทียมชอบอากาศเย็น 12–24°C
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 60, pLow: 15, pMid: 30,   // กระเทียม — ต้องการธาตุสูง
+      kLow: 80, kMid: 120 }
   },
   mangosteen: {
     label: 'มังคุด',
@@ -124,25 +155,34 @@ const CROP_CRITERIA = {
     ph:       { min: 5.0, max: 6.5, optMin: 5.5, optMax: 6.5 },  // LDD เล่ม 28 (มังคุด): S1 5.5–6.5, S2–S3 5.0–6.5
     ec:       { max: 1 },              // <1 dS/m — มังคุดอ่อนไหวต่อความเค็มมาก
     temp:     { min: 22, max: 33 },    // มังคุดชอบร้อนชื้น
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 45, pLow: 12, pMid: 30,   // มังคุด — K ค่อนข้างสูง
+      kLow: 80, kMid: 120 }
   },
   jujube: {
     label: 'พุทรา',
     icon:  '🍏',
     moisture: { min: 40, max: 70 },    // ทนแล้ง ต้องการน้ำพอเหมาะ (แนวทางรดน้ำ)
-    ph:       { min: 5.0, max: 8.0, optMin: 6.0, optMax: 7.0 },  // LDD เล่ม 28 (พุทรา): S1 6.0–7.0, S2–S3 5.0–8.0
+    ph:       { min: 5.0, max: 8.5, optMin: 6.0, optMax: 7.0 },  // LDD เล่ม 28 (พุทรา): S1 6.0–7.0, S2–S3 5.0–8.0 · Winrock ทนด่าง ~9 — ระบบใช้ max 8.5
     ec:       { max: 2 },              // <2 dS/m — ทนเค็มปานกลาง
     temp:     { min: 18, max: 45 },    // พุทราเป็นไม้ผลทนร้อนมาก (Winrock) ทนได้ ~50°C ※แก้จากเดิม 35
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 40, pLow: 10, pMid: 25,   // พุทรา — ต้องการธาตุปานกลาง
+      kLow: 70, kMid: 100 }
   },
   watermelon: {
     label: 'แตงโม',
     icon:  '🍉',
     moisture: { min: 50, max: 80 },    // ต้องการน้ำสม่ำเสมอ (แนวทางรดน้ำ)
-    ph:       { min: 5.0, max: 7.5, optMin: 6.0, optMax: 7.0 },  // เอกสารวิชาการ: เหมาะ 5.7–7.2 ※ไม่ใช่เล่ม 28
+    ph:       { min: 5.0, max: 7.5, optMin: 5.7, optMax: 7.2 },  // เอกสารวิชาการ: เหมาะ 5.7–7.2 ※ไม่ใช่เล่ม 28
     ec:       { max: 2 },              // <2 dS/m
     temp:     { min: 20, max: 35 },    // แตงโมชอบอากาศร้อน
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 50, pLow: 15, pMid: 30,   // แตงโม — ต้องการ P ค่อนข้างสูง
+      kLow: 80, kMid: 120 }
   },
   pumpkin: {
     label: 'ฟักทอง',
@@ -151,7 +191,10 @@ const CROP_CRITERIA = {
     ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 7.0 },  // เอกสารวิชาการ: เหมาะ 6.0–7.0 ※ไม่ใช่เล่ม 28
     ec:       { max: 2 },              // <2 dS/m
     temp:     { min: 18, max: 32 },    // ฟักทองชอบอากาศอบอุ่น
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 50, pLow: 12, pMid: 28,   // ฟักทอง — ต้องการธาตุปานกลาง-สูง
+      kLow: 80, kMid: 120 }
   },
   vegetables: {
     label: 'ผักสวนครัว',
@@ -160,7 +203,10 @@ const CROP_CRITERIA = {
     ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 7.0 },  // เกณฑ์ทั่วไป (LDD pH 6–7) ※ไม่ใช่เล่ม 28
     ec:       { max: 1 },              // <1 dS/m — พืชผักอ่อนไหวต่อความเค็ม
     temp:     { min: 15, max: 32 },
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 60, pLow: 15, pMid: 30,   // ผักสวนครัว — ต้องการ N/P/K สูง
+      kLow: 80, kMid: 120 }
   },
   pomelo: {
     label: 'ส้มโอ',
@@ -169,16 +215,22 @@ const CROP_CRITERIA = {
     ph:       { min: 5.0, max: 6.5, optMin: 5.5, optMax: 6.5 },  // LDD เล่ม 28 (ส้มโอ): S1 5.5–6.5, S2–S3 5.0–6.5 — ตระกูลส้ม
     ec:       { max: 1 },              // <1 dS/m — ส้มโออ่อนไหวต่อความเค็ม
     temp:     { min: 20, max: 35 },
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 45, pLow: 12, pMid: 30,   // ส้มโอ — N/K สำคัญ (ตระกูลส้ม)
+      kLow: 70, kMid: 100 }
   },
   guava: {
     label: 'ฝรั่ง',
     icon:  '🍐',
     moisture: { min: 40, max: 75 },    // ต้องการน้ำพอเหมาะ (แนวทางรดน้ำ)
-    ph:       { min: 5.0, max: 7.0, optMin: 5.5, optMax: 6.5 },  // UF/IFAS, FAO: ทน pH กว้าง 4.5–9.4, เหมาะ 5.5–6.5 ※ไม่ใช่เล่ม 28
+    ph:       { min: 4.5, max: 8.5, optMin: 5.5, optMax: 6.5 },  // UF/IFAS, FAO: ทน pH กว้าง 4.5–9.4, เหมาะ 5.5–6.5 — ระบบ alert แค่ช่วง 4.5–8.5 ※ไม่ใช่เล่ม 28
     ec:       { max: 2 },              // <2 dS/m — ทนเค็มปานกลาง
     temp:     { min: 20, max: 35 },
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 45, pLow: 10, pMid: 25,   // ฝรั่ง — ต้องการธาตุปานกลาง
+      kLow: 70, kMid: 100 }
   },
   other: {
     label: 'อื่นๆ',
@@ -187,7 +239,10 @@ const CROP_CRITERIA = {
     ph:       { min: 5.5, max: 7.5, optMin: 6.0, optMax: 6.5 },  // พืชส่วนใหญ่เหมาะ pH 6.0–6.5 (LDD)
     ec:       { max: 2 },              // 2 dS/m (เกณฑ์ความเค็มทั่วไปของ LDD)
     temp:     { min: 15, max: 35 },
-    npk: { ...NPK_DEFAULT }
+    npk: {
+      ...NPK_DEFAULT,
+      nLow: 50, pLow: 10, pMid: 25,   // พืชทั่วไป — baseline LDD ตาราง 15
+      kLow: 60, kMid: 90 }
   }
 };
 
