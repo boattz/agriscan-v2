@@ -249,6 +249,29 @@
       </div>
     </div>
 
+    <!-- ═══ LINE ALERTS ═══ -->
+    <div class="section-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path
+          d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9v-2h2v2zm0-4H9V7h2v5z" />
+      </svg>
+      แจ้งเตือน LINE
+    </div>
+    <div class="rec-grid" id="line-grid">
+      <div class="rec-item info">
+        <span class="rec-icon">🔔</span>
+        <div class="rec-content">
+          <div class="rec-title" id="line-title">กำลังตรวจสอบสถานะ...</div>
+          <div class="rec-desc" id="line-desc">กำลังดึงสถานะระบบแจ้งเตือนจาก backend...</div>
+          <div class="line-actions">
+            <a class="btn-refresh" id="line-add-btn" href="#" target="_blank" rel="noopener" style="display:none">＋
+              เพิ่มเพื่อน OA</a>
+            <button class="btn-refresh" id="line-test-btn" onclick="sendLineTest()">📨 ส่งทดสอบ</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══ FOOTER ═══ -->
     <footer class="footer">
       <p>Agriscan &copy; 2026 · RS485 Modbus 7-in-1 Soil Sensor</p>

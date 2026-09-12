@@ -399,6 +399,79 @@ function hideBanners() {
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
+// ─── LINE Alerts ────────────────────────────────────────────
+function alertsApiBase() {
+  // /api/alerts/* มีเฉพาะบน Flask backend (cloud/localhost) — ไม่มีบน ESP32
+  if (state.activeApiUrl) {
+    try {
+      const host = new URL(state.activeApiUrl).hostname;
+      if (/onrender\.com|localhost|127\.0\.0\.1/i.test(host)) {
+        return state.activeApiUrl.replace(/\/data$/, '');
+      }
+    } catch (e) {}
+  }
+  return CONFIG.cloudApiUrl.replace(/\/+$/, '');
+}
+
+async function fetchLineStatus() {
+  const title = $('line-title'), desc = $('line-desc'), addBtn = $('line-add-btn');
+  if (!title || !desc) return;
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(alertsApiBase() + '/api/alerts/status', { signal: ctrl.signal });
+    clearTimeout(timeout);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const s = await res.json();
+
+    if (s.add_friend_url && addBtn) {
+      addBtn.href = s.add_friend_url;
+      addBtn.style.display = '';
+    }
+
+    let lastTxt = 'ยังไม่เคยส่งแจ้งเตือน';
+    if (s.last_alerts && s.last_alerts.length > 0) {
+      const l = s.last_alerts[0];
+      lastTxt = `แจ้งล่าสุด: ${l.key} (${l.severity}) · ${l.at || '-'}`;
+    }
+    let staleTxt = '';
+    if (s.stale) staleTxt = ' · ⚠ ESP32 เงียบเกิน 10 นาที';
+
+    if (!s.line_configured && !s.dry_run) {
+      title.textContent = '🔕 ยังไม่เปิดใช้งาน LINE';
+      desc.textContent = `ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN บน Render ก่อน (เกณฑ์ ${s.crop_label}) · ${lastTxt}`;
+    } else if (s.dry_run) {
+      title.textContent = '🧪 โหมดทดสอบ (DRY-RUN — ยังไม่ยิงจริง)';
+      desc.textContent = `เกณฑ์ ${s.crop_label} · แจ้งขั้น ${s.min_severity} · cooldown ${s.cooldown_min} นาที · ${lastTxt}${staleTxt}`;
+    } else {
+      title.textContent = '🔔 แจ้งเตือน LINE เปิดใช้งานแล้ว';
+      desc.textContent = `เกณฑ์ ${s.crop_label} · แจ้งขั้น ${s.min_severity} · cooldown ${s.cooldown_min} นาที · ${lastTxt}${staleTxt}`;
+    }
+  } catch (err) {
+    title.textContent = '🔕 เชื่อม backend ไม่ได้';
+    desc.textContent = 'ดึงสถานะ LINE ไม่สำเร็จ — backend อาจหลับอยู่ (Render free) ลองรีเฟรชอีกครั้ง';
+  }
+}
+
+async function sendLineTest() {
+  const btn = $('line-test-btn'), desc = $('line-desc');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(alertsApiBase() + '/api/alerts/test', { method: 'POST' });
+    const j = await res.json();
+    if (desc) {
+      if (j.sent)           desc.textContent = '📨 ส่งทดสอบแล้ว — เช็คข้อความใน LINE ได้เลย';
+      else if (j.dry)       desc.textContent = '🧪 DRY-RUN preview: ' + (j.preview || '').slice(0, 160) + '…';
+      else if (res.status === 429) desc.textContent = '⏳ ' + (j.reason || 'ติด cooldown — รอสักครู่แล้วกดใหม่');
+      else                  desc.textContent = 'ส่งไม่สำเร็จ: ' + (j.error || j.reason || JSON.stringify(j.info || {}));
+    }
+  } catch (err) {
+    if (desc) desc.textContent = 'ส่งไม่สำเร็จ — เชื่อม backend ไม่ได้';
+  }
+  if (btn) btn.disabled = false;
+  fetchLineStatus();
+}
+
 // ─── Manual refresh ───────────────────────────────────────
 async function manualRefresh() {
   const btn = $('btn-refresh');
@@ -421,6 +494,8 @@ function startPolling() {
 window.addEventListener('DOMContentLoaded', () => {
   syncCropUI();
   startPolling();
+  fetchLineStatus();
+  setInterval(fetchLineStatus, 30000);   // สถานะ LINE เปลี่ยนช้า — เช็คทุก 30 วิพอ
 });
 
 // Reconnect when tab becomes visible

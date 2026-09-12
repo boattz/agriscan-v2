@@ -10,6 +10,9 @@
 ---
 
 ## [Unreleased]
+### Added
+- **แจ้งเตือน LINE (Phase 1)** — backend ประเมินค่าทุก reading ด้วย `backend/alerts.py` (mirror เกณฑ์ `crops.js` + กติกา `buildRecommendations`) แล้วยิง LINE OA Messaging API (push/broadcast) แม้ปิดเบราว์เซอร์ — กันสแปมด้วยตาราง `alert_state` (cooldown 60 นาที/หัวข้อ, ปุ่มทดสอบ 10 นาที) + endpoints `POST /api/alerts/test`, `GET /api/alerts/status` + การ์ด LINE บน dashboard + env ใหม่ใน `render.yaml` (เกณฑ์พืชเดียวกลางผ่าน `ALERT_CROP`, default `other`)
+
 ### Changed
 - **เกณฑ์ NPK แยกรายพืช** — N/P/K thresholds ไม่ใช้ชุดเดียวทั้งระบบอีกต่อไป แต่ละพืชมีค่าของตัวเอง (เช่น ข้าวโพด/ผัก N สูง · มันสำปะหลัง/ทุเรียน/มันฝรั่ง K สูง · มันสำปะหลังทน N ต่ำ) — baseline อ้างอิง LDD ตาราง 15 (ระดับธาตุในดิน) แล้วปรับตามความต้องการธาตุแต่ละพืช
 - **ปรับเกณฑ์ pH รายพืชให้ตรงแหล่งอ้างอิง** — ข้าวโพด max 8.4→7.8 (ทนด่างน้อยกว่าข้าว) · ยางพารา opt 5.5–6.5 · แตงโม opt 5.7–7.2 · หอมหัวใหญ่ opt 6.0–6.8 · ฝรั่ง alert ช่วง 4.5–8.5 (UF/IFAS ทน 4.5–9.4) · พุทรา max 8.5 (Winrock ทนด่าง ~9)

@@ -1083,6 +1083,11 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
       </div>
     </div>
 
+    <div class="card reveal" style="margin-top:18px;">
+      <div class="c-big">🔔 แจ้งเตือน LINE (Messaging API)</div>
+      <div class="c-desc" style="margin-top:6px;">backend ประเมินค่าทุก reading ด้วยเกณฑ์รายพืชชุดเดียวกับ dashboard (<code class="inline">backend/alerts.py</code> mirror <code class="inline">crops.js</code>) → รวมทุกหัวข้อเป็นข้อความเดียวยิงผ่าน LINE OA (push/broadcast) แม้ปิดเบราว์เซอร์ — กันสแปมด้วยตาราง <code class="inline">alert_state</code> (cooldown 60 นาที/หัวข้อ · ปุ่มทดสอบ 10 นาที) · โควต้าฟรี 200 ข้อความ/เดือน · endpoints: <code class="inline">POST /api/alerts/test</code> + <code class="inline">GET /api/alerts/status</code></div>
+    </div>
+
     <div class="grid2" style="margin-top:18px;">
       <div class="reveal">
         <div class="sub-label">ตารางในฐานข้อมูล (PostgreSQL)</div>
@@ -1098,6 +1103,7 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
               <tr><td class="mono">n · p · k</td><td class="mono">INTEGER</td></tr>
               <tr><td class="mono">valid</td><td class="mono">BOOLEAN</td></tr>
               <tr><td class="mono">created_at</td><td class="mono">TIMESTAMPTZ (auto)</td></tr>
+              <tr><td class="mono">alert_state</td><td class="mono">TABLE แยก — alert_key PK · severity · last_sent_at (กันส่ง LINE ซ้ำ)</td></tr>
             </tbody>
           </table>
         </div>
@@ -1196,6 +1202,7 @@ curl http://localhost:5000/api/latest   <span class="c"># → ค่าล่า
           <li><b>เกณฑ์อ้างอิงทางการ:</b> P/K/EC/pH ตามเกณฑ์กรมพัฒนาที่ดิน พร้อมแหล่งอ้างอิง และ <b>เลือกชนิดพืชได้</b> (18 ชนิด: ข้าว/ข้าวโพด/ยางพารา/ลำไย/ลิ้นจี่/ทุเรียน/มังคุด/มันสำปะหลัง/มันฝรั่ง/หอมหัวใหญ่/กระเทียม/พุทรา/แตงโม/ฟักทอง/ผักสวนครัว/ส้มโอ/ฝรั่ง/อื่นๆ) เกณฑ์เปลี่ยนตามพืช</li>
           <li><b>ทนทาน:</b> อ่านเซ็นเซอร์ไม่สำเร็จใช้ค่าเดิม, WiFi หลุด reconnect อัตโนมัติ, fallback chain 7 ระดับ</li>
           <li><b>ใช้งานง่าย:</b> UI ภาษาไทย + คำแนะนำบอกสูตรปุ๋ยเป็นตัวเลขชัดเจน</li>
+          <li><b>แจ้งเตือน LINE:</b> backend ยิง push เองแม้ปิดเบราว์เซอร์ — เกณฑ์เดียวกับหน้าเว็บ รวมทุกหัวข้อเป็นข้อความเดียวก่อนส่ง</li>
         </ul>
       </div>
       <div class="pc con reveal">
@@ -1207,6 +1214,7 @@ curl http://localhost:5000/api/latest   <span class="c"># → ค่าล่า
           <li><b>ต้องซิงค์ 2 ชุดด้วยมือ:</b> <code class="inline">dashboard.h</code> (ฝังใน ESP32) กับโฟลเดอร์ <code class="inline">dashboard/</code></li>
           <li><b>ความปลอดภัยแบบเบา:</b> API key กันการส่งข้อมูลปลอม แต่ CORS ยังเปิดและ key ฝังใน firmware</li>
           <li><b>ค่า N (mg/kg) ไม่มีเกณฑ์ทางการ:</b> กรมฯ วัด N เป็น % — ค่าจากเซ็นเซอร์เป็นเพียงค่าบ่งชี้</li>
+          <li><b>โควต้า LINE ฟรี 200 ข้อความ/เดือน:</b> กันเปลืองด้วย cooldown 60 นาที/หัวข้อ + รวมข้อความเป็นก้อนเดียว — ถ้าหลายแปลง/หลายคนต้องไป Phase 2 (multicast รายพืช)</li>
         </ul>
       </div>
     </div>

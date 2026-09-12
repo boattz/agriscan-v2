@@ -15,6 +15,23 @@ services:
         fromDatabase:
           name: agriscan-db
           property: connectionString
+      # ── LINE Alerts (Phase 1) — ตั้งค่าจริงใน Render Dashboard ──
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false # Channel Access Token จาก LINE Developers → Messaging API
+      - key: LINE_TARGET_MODE
+        value: broadcast # broadcast = ผู้ติดตาม OA ทุกคน · push = ส่งหา LINE_TARGET_ID
+      - key: LINE_TARGET_ID
+        sync: false # userId/groupId (ใช้เฉพาะ mode push)
+      - key: LINE_ADD_FRIEND_URL
+        sync: false # ลิงก์เพิ่มเพื่อน OA (เช่น https://lin.ee/xxxxxxx) โชว์บน dashboard
+      - key: ALERT_CROP
+        value: other # key ตาม dashboard/crops.js (rice, corn, …)
+      - key: ALERT_MIN_SEVERITY
+        value: warn # warn = เอาหมด · alert = เฉพาะวิกฤต
+      - key: ALERT_COOLDOWN_MIN
+        value: 60 # alert เดิมส่งซ้ำได้ทุก 60 นาที (กันเปลืองโควต้า 200/เดือน)
+      - key: DASHBOARD_PUBLIC_URL
+        value: https://agriscan-v2.onrender.com
 
 databases:
   - name: agriscan-db

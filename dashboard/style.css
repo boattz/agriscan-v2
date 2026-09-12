@@ -627,6 +627,16 @@ body::after {
   line-height: 1.55;
 }
 
+/* LINE alerts card */
+.line-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+a.btn-refresh { text-decoration: none; }
+.btn-refresh:disabled { opacity: 0.5; cursor: wait; }
+
 /* ══════════════════════════════════════════════
    Footer
 ══════════════════════════════════════════════ */
