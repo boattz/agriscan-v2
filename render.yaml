@@ -23,7 +23,7 @@ services:
       - key: LINE_TARGET_ID
         sync: false # userId/groupId (ใช้เฉพาะ mode push)
       - key: LINE_ADD_FRIEND_URL
-        sync: false # ลิงก์เพิ่มเพื่อน OA (เช่น https://lin.ee/xxxxxxx) โชว์บน dashboard
+        value: https://line.me/R/ti/p/@500vdtpt # ปุ่มเพิ่มเพื่อน OA บน dashboard
       - key: ALERT_CROP
         value: other # key ตาม dashboard/crops.js (rice, corn, …)
       - key: ALERT_MIN_SEVERITY
