@@ -633,7 +633,21 @@ body::after {
   gap: 10px;
   margin-top: 12px;
   flex-wrap: wrap;
+  align-items: center;
 }
+#line-crop-select {
+  appearance: none;
+  padding: 10px 40px 10px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-dim);
+  background: var(--bg-card) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2393c9a5' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 16px center;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+#line-crop-select:focus { outline: none; border-color: var(--border-glow); }
+#line-crop-select option { background: var(--bg-card-2); }
 a.btn-refresh { text-decoration: none; }
 .btn-refresh:disabled { opacity: 0.5; cursor: wait; }
 

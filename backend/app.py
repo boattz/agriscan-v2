@@ -13,6 +13,8 @@ Endpoints:
   GET  /api/alerts/status → สถานะระบบแจ้งเตือน + alert ล่าสุด (ให้ dashboard)
   POST /api/line/webhook  ← รับ event จาก LINE OA (เก็บ userId + ตอบยืนยัน)
   GET  /api/line/subscribers → ดู userId ที่ลงทะเบียน (ต้องมี X-API-Key)
+  GET  /api/alerts/crops  → รายชื่อพืชทั้งหมด (ให้ dropdown)
+  GET/POST /api/alerts/crop → ดู/เปลี่ยนพืชที่ใช้ตัดสิน alert
   GET  /              → เสิร์ฟหน้า dashboard
 """
 
@@ -126,6 +128,12 @@ if DATABASE_URL:
         subscribed_at TIMESTAMPTZ DEFAULT NOW()
     );
     """
+    SETTINGS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT DEFAULT ''
+    );
+    """
 else:
     ALERT_STATE_SCHEMA = """
     CREATE TABLE IF NOT EXISTS alert_state (
@@ -140,6 +148,12 @@ else:
         display_name TEXT,
         active       INTEGER DEFAULT 1,
         subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    SETTINGS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT DEFAULT ''
     );
     """
 
@@ -159,6 +173,7 @@ def init_db():
             conn.execute(SCHEMA)
             conn.execute(ALERT_STATE_SCHEMA)
             conn.execute(LINE_SUBSCRIBERS_SCHEMA)
+            conn.execute(SETTINGS_SCHEMA)
             conn.commit()
         print("[OK] Database พร้อมใช้งาน" + (" (PostgreSQL)" if DATABASE_URL else " (SQLite local)"))
     except Exception as e:
@@ -291,7 +306,7 @@ def evaluate_and_notify(reading):
     - ยังเป็นอยู่ (เคยส่งแล้ว) → เงียบ
     - หายแล้วกลับมาเป็นอีก → เตือนซ้ำได้ (กัน flapping ด้วย cooldown)
     """
-    crop_key = alerts.get_crop_key(ALERT_CROP)
+    crop_key = _effective_crop()
     items = alerts.filter_by_severity(
         alerts.evaluate(reading, crop_key), ALERT_MIN_SEVERITY)
     now_active = {i["key"]: i for i in items}
@@ -468,7 +483,7 @@ def alerts_test():
         reading = {f: latest_row[f] for f in
                    ["moisture", "temperature", "ec", "ph", "n", "p", "k"]}
 
-    crop_key = alerts.get_crop_key(ALERT_CROP)
+    crop_key = _effective_crop()
     items = alerts.filter_by_severity(
         alerts.evaluate(reading, crop_key), ALERT_MIN_SEVERITY)
     crop = alerts.get_crop(crop_key)
@@ -501,7 +516,7 @@ def alerts_test():
 @app.route("/api/alerts/status", methods=["GET"])
 def alerts_status():
     """สถานะระบบแจ้งเตือนให้ dashboard (ไม่เปิดเผย token)"""
-    crop_key = alerts.get_crop_key(ALERT_CROP)
+    crop_key = _effective_crop()
     crop = alerts.get_crop(crop_key)
 
     latest_age_s, stale = None, None
@@ -619,6 +634,48 @@ def _count_subscribers():
         return 0
 
 
+def _get_setting(key, default=""):
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                f'SELECT "value" FROM settings WHERE "key" = {PARAM}', (key,))
+            row = cur.fetchone()
+            if row is None:
+                return default
+            return row["value"] if row["value"] != "" else default
+    except Exception:
+        return default
+
+
+def _set_setting(key, value):
+    try:
+        with get_conn() as conn:
+            if DATABASE_URL:
+                conn.execute(
+                    'INSERT INTO settings ("key", "value") VALUES (%s, %s) '
+                    'ON CONFLICT ("key") DO UPDATE SET "value" = '
+                    "EXCLUDED.value",
+                    (key, value),
+                )
+            else:
+                conn.execute(
+                    'INSERT INTO settings ("key", "value") VALUES (?, ?) '
+                    'ON CONFLICT ("key") DO UPDATE SET "value" = '
+                    "excluded.value",
+                    (key, value),
+                )
+            conn.commit()
+            return True
+    except Exception as e:
+        print("[Alert] บันทึก setting ล้มเหลว:", e)
+        return False
+
+
+def _effective_crop():
+    """พืชที่ใช้ตัดสิน alert — ค่าที่เลือกผ่าน dashboard มาก่อน, env เป็น default"""
+    return alerts.get_crop_key(_get_setting("alert_crop", ALERT_CROP))
+
+
 def _latest_reading():
     """ค่าล่าสุดจาก DB (ให้บอทตอบ 'สถานะ')"""
     try:
@@ -654,7 +711,7 @@ def _handle_chat(user_id, reply_token, text):
         if reading is None:
             return line_notify.reply_text(
                 reply_token, "ยังไม่มีข้อมูลเซ็นเซอร์ รอ ESP32 ส่งรอบแรก")
-        crop = alerts.get_crop(alerts.get_crop_key(ALERT_CROP))
+        crop = alerts.get_crop(_effective_crop())
         return line_notify.reply_msg(
             reply_token,
             alerts.format_flex_status(
@@ -733,6 +790,37 @@ def line_subscribers():
     except Exception:
         return jsonify({"error": "database unavailable"}), 503
     return jsonify({"count": len(subs), "subscribers": subs})
+
+
+@app.route("/api/alerts/crops", methods=["GET"])
+def alerts_crops():
+    """รายชื่อพืชทั้งหมดให้ dropdown เลือกพืชที่จะใช้เตือน"""
+    return jsonify({"current": _effective_crop(),
+                    "crops": alerts.list_crops()})
+
+
+@app.route("/api/alerts/crop", methods=["GET", "POST"])
+def alerts_crop():
+    """ดู/เปลี่ยนพืชที่ใช้ตัดสิน alert (เก็บใน DB — restart ไม่หาย)"""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        key = alerts.get_crop_key(body.get("crop", ""))
+        if body.get("crop", "") not in alerts.CROPS:
+            return jsonify({"error": "unknown crop",
+                            "crops": alerts.list_crops()}), 400
+        _set_setting("alert_crop", key)
+        # เปลี่ยนพืช = เกณฑ์เปลี่ยน → ล้างสถานะ active เก่า กันค้างเตือนผิดเกณฑ์
+        try:
+            with get_conn() as conn:
+                conn.execute("DELETE FROM alert_state "
+                             "WHERE alert_key != 'manual_test'")
+                conn.commit()
+        except Exception:
+            pass
+    key = _effective_crop()
+    crop = alerts.get_crop(key)
+    return jsonify({"crop": key,
+                    "crop_label": f"{crop['icon']} {crop['label']}"})
 
 
 init_db()

@@ -264,6 +264,8 @@
           <div class="rec-title" id="line-title">กำลังตรวจสอบสถานะ...</div>
           <div class="rec-desc" id="line-desc">กำลังดึงสถานะระบบแจ้งเตือนจาก backend...</div>
           <div class="line-actions">
+            <select id="line-crop-select" onchange="changeAlertCrop(this.value)" aria-label="เลือกพืชที่ใช้เตือน"
+              style="display:none"></select>
             <a class="btn-refresh" id="line-add-btn" href="#" target="_blank" rel="noopener" style="display:none">＋
               เพิ่มเพื่อน OA</a>
             <button class="btn-refresh" id="line-test-btn" onclick="sendLineTest()">📨 ส่งทดสอบ</button>

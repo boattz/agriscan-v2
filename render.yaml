@@ -23,7 +23,7 @@ services:
       - key: LINE_ADD_FRIEND_URL
         value: https://line.me/R/ti/p/@500vdtpt # ปุ่มเพิ่มเพื่อน OA บน dashboard
       - key: ALERT_CROP
-        value: other # key ตาม dashboard/crops.js (rice, corn, …)
+        value: other # default ตั้งต้น — เปลี่ยนได้ตลอดบน dashboard (ทุกพืช)
       - key: ALERT_MIN_SEVERITY
         value: alert # alert = เฉพาะเรื่องสำคัญ · warn = รวมเตือนเฝ้าระวังด้วย
       - key: ALERT_COOLDOWN_MIN

@@ -456,8 +456,42 @@ async function fetchLineStatus() {
   }
 }
 
-async function sendLineTest() {
-  const btn = $('line-test-btn'), desc = $('line-desc');
+// ─── พืชที่ใช้ตัดสิน alert (เลือกได้ทั้งหมด ไม่ล็อก env) ────
+async function loadAlertCrops() {
+  const sel = $('line-crop-select');
+  if (!sel) return;
+  try {
+    const res = await fetch(alertsApiBase() + '/api/alerts/crops');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const j = await res.json();
+    sel.innerHTML = (j.crops || []).map(c =>
+      `<option value="${c.key}">${c.icon} ${c.label}</option>`).join('');
+    sel.value = j.current || 'other';
+    sel.style.display = '';
+  } catch (err) {
+    sel.style.display = 'none';
+  }
+}
+
+async function changeAlertCrop(key) {
+  const desc = $('line-desc');
+  try {
+    const res = await fetch(alertsApiBase() + '/api/alerts/crop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ crop: key })
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || 'HTTP ' + res.status);
+    if (desc) desc.textContent = `🔄 เปลี่ยนพืชเตือนเป็น ${j.crop_label} แล้ว (ล้างสถานะเก่า เริ่มนับใหม่)`;
+  } catch (err) {
+    if (desc) desc.textContent = 'เปลี่ยนพืชไม่สำเร็จ — เชื่อม backend ไม่ได้';
+    loadAlertCrops(); // คืนค่าที่เลือกกลับ
+  }
+  fetchLineStatus();
+}
+
+async function sendLineTest() {  const btn = $('line-test-btn'), desc = $('line-desc');
   if (btn) btn.disabled = true;
   try {
     const res = await fetch(alertsApiBase() + '/api/alerts/test', { method: 'POST' });
@@ -498,6 +532,7 @@ window.addEventListener('DOMContentLoaded', () => {
   syncCropUI();
   startPolling();
   fetchLineStatus();
+  loadAlertCrops();
   setInterval(fetchLineStatus, 30000);   // สถานะ LINE เปลี่ยนช้า — เช็คทุก 30 วิพอ
 });
 

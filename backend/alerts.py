@@ -91,6 +91,12 @@ def get_crop_key(crop_key):
     return crop_key if crop_key in CROPS else "other"
 
 
+def list_crops():
+    """รายชื่อพืชทั้งหมด (key/label/icon) — ให้ dashboard เลือกพืชที่จะใช้เตือน"""
+    return [{"key": k, "label": v["label"], "icon": v["icon"]}
+            for k, v in CROPS.items()]
+
+
 def evaluate(reading, crop_key="other"):
     """ประเมินค่าเซ็นเซอร์ 1 ชุด → ลิสต์ alert/warn (mirror buildRecommendations)
 
