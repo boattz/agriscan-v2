@@ -23,6 +23,38 @@ const char* CLOUD_URL = "https://agriscan-v2.onrender.com/api/readings";
 // ความถี่ส่งข้อมูลขึ้นคลาวด์ (มิลลิวินาที) — 3,000 = ทุก 3 วินาที
 #define POST_INTERVAL_MS  3000
 
+// ── Calibration offsets (ชดเชยเซ็นเซอร์หลังเทียบกับ buffer/เครื่องมืออ้างอิง) ──
+// วิธีใช้: เทียบกับสารละลายมาตรฐานแล้วใส่ส่วนต่าง เช่น อ่าน pH ได้ 6.7 แต่ buffer
+// คือ 7.0 → ตั้ง CAL_PH 0.3 แล้ว re-flash (ทศนิยม 1 ตำแหน่งก็พอ)
+#define CAL_MOISTURE     0.0
+#define CAL_TEMPERATURE  0.0
+#define CAL_EC           0
+#define CAL_PH           0.0
+#define CAL_N            0
+#define CAL_P            0
+#define CAL_K            0
+
+// ── ช่วงที่เป็นไปได้ทางฟิสิกส์ (หลุด = เซ็นเซอร์เพี้ยน/สายหลุด → valid=false) ──
+#define LIM_MOIST_MIN  0.0
+#define LIM_MOIST_MAX  100.0
+#define LIM_TEMP_MIN   -10.0
+#define LIM_TEMP_MAX   60.0
+#define LIM_EC_MIN     0
+#define LIM_EC_MAX     20000
+#define LIM_PH_MIN     0.0
+#define LIM_PH_MAX     14.0
+#define LIM_NPK_MIN    0
+#define LIM_NPK_MAX    1999
+
+// ── ช่วงน่าสงสัย (เป็นไปได้แต่แปลก → valid=true แต่ quality=suspect) ──
+#define SUS_TEMP_MAX   50.0
+#define SUS_EC_MAX     5000
+#define SUS_PH_LO      3.0
+#define SUS_PH_HI      10.0
+
+// ── Median filter: อ่านกี่ครั้งต่อรอบ (คั่น 80ms) ──
+#define NUM_SAMPLES    5
+
 // ── RS485 ─────────────────────────────────────────────────
 #define RXD2        16
 #define TXD2        17
@@ -44,6 +76,7 @@ WebServer server(80);       // ← Web Server port 80
 #define REG_COUNT        7
 
 // ── Struct ────────────────────────────────────────────────
+// quality: 0=good 1=suspect 2=bad · reason: รหัสสั้นให้ cloud/dashboard แปลเป็นไทย
 struct SoilData {
   float moisture;
   float temperature;
@@ -53,9 +86,11 @@ struct SoilData {
   int   phosphorus;
   int   potassium;
   bool  valid;
+  uint8_t quality;
+  char  reason[32];
 };
 
-SoilData lastData = {0, 0, 0, 0, 0, 0, 0, false};
+SoilData lastData = {0, 0, 0, 0, 0, 0, 0, false, 2, "init"};
 
 // ── WiFi Connect ──────────────────────────────────────────
 void connectWiFi() {
@@ -78,23 +113,99 @@ void connectWiFi() {
   }
 }
 
-// ── Read Sensor ───────────────────────────────────────────
-SoilData readSensor() {
-  SoilData d = {0, 0, 0, 0, 0, 0, 0, false};
-  uint8_t result = node.readHoldingRegisters(REG_MOISTURE, REG_COUNT);
-  Serial.printf("[Modbus] result=%d\n", result);
+// ── Read Sensor (median NUM_SAMPLES + calibration + range check) ──
+// คืน valid=false พร้อม reason เมื่อ Modbus ล้มเหลวหรือค่าหลุดโลก —
+// ผู้เรียกต้องอัปเดต lastData เสมอ (อย่าเงียบใช้ค่าเก่า) ให้ dashboard โชว์ sensor-error
+static float medianOf5(float *a) {
+  // bubble sort 5 ตัว (เล็กพอ ไม่ต้องไลบรารี)
+  for (uint8_t i = 0; i < 4; i++)
+    for (uint8_t j = i + 1; j < 5; j++)
+      if (a[j] < a[i]) { float t = a[i]; a[i] = a[j]; a[j] = t; }
+  return a[2];
+}
+static int medianInt5(float *a) { return (int)(medianOf5(a) + 0.5f); }
 
-  if (result == node.ku8MBSuccess) {
-    d.moisture    = node.getResponseBuffer(0) / 10.0;
-    d.temperature = (int16_t)node.getResponseBuffer(1) / 10.0;
-    d.ec          = node.getResponseBuffer(2);
-    d.ph          = node.getResponseBuffer(3) / 10.0;
-    d.nitrogen    = node.getResponseBuffer(4);
-    d.phosphorus  = node.getResponseBuffer(5);
-    d.potassium   = node.getResponseBuffer(6);
-    d.valid       = true;
+SoilData readSensor() {
+  SoilData d = {0, 0, 0, 0, 0, 0, 0, false, 2, "modbus_timeout"};
+  float mArr[NUM_SAMPLES], tArr[NUM_SAMPLES], ecArr[NUM_SAMPLES],
+        phArr[NUM_SAMPLES], nArr[NUM_SAMPLES], pArr[NUM_SAMPLES], kArr[NUM_SAMPLES];
+  uint8_t ok = 0;
+
+  for (uint8_t i = 0; i < NUM_SAMPLES; i++) {
+    uint8_t result = node.readHoldingRegisters(REG_MOISTURE, REG_COUNT);
+    if (result == node.ku8MBSuccess) {
+      mArr[ok]  = node.getResponseBuffer(0) / 10.0;
+      tArr[ok]  = (int16_t)node.getResponseBuffer(1) / 10.0;
+      ecArr[ok] = node.getResponseBuffer(2);
+      phArr[ok] = node.getResponseBuffer(3) / 10.0;
+      nArr[ok]  = node.getResponseBuffer(4);
+      pArr[ok]  = node.getResponseBuffer(5);
+      kArr[ok]  = node.getResponseBuffer(6);
+      ok++;
+    } else {
+      Serial.printf("[Modbus] sample %d fail (%d)\n", i, result);
+    }
+    if (i + 1 < NUM_SAMPLES) delay(80);
   }
+  Serial.printf("[Modbus] ok=%d/%d\n", ok, NUM_SAMPLES);
+
+  if (ok < 3) return d;  // ล้มเหลวเกินครึ่ง → valid=false reason=modbus_timeout
+
+  // median + calibration
+  d.moisture    = medianOf5(mArr)    + CAL_MOISTURE;
+  d.temperature = medianOf5(tArr)    + CAL_TEMPERATURE;
+  d.ec          = medianInt5(ecArr)  + CAL_EC;
+  d.ph          = medianOf5(phArr)   + CAL_PH;
+  d.nitrogen    = medianInt5(nArr)   + CAL_N;
+  d.phosphorus  = medianInt5(pArr)   + CAL_P;
+  d.potassium   = medianInt5(kArr)   + CAL_K;
+
+  // จับเซ็นเซอร์แกว่ง (max-min) จากตัวอย่างที่อ่านสำเร็จ
+  float mSpread = 0, tSpread = 0, phSpread = 0;
+  { float mn = mArr[0], mx = mArr[0];
+    for (uint8_t i = 1; i < ok; i++) { if (mArr[i] < mn) mn = mArr[i]; if (mArr[i] > mx) mx = mArr[i]; }
+    mSpread = mx - mn; }
+  { float mn = tArr[0], mx = tArr[0];
+    for (uint8_t i = 1; i < ok; i++) { if (tArr[i] < mn) mn = tArr[i]; if (tArr[i] > mx) mx = tArr[i]; }
+    tSpread = mx - mn; }
+  { float mn = phArr[0], mx = phArr[0];
+    for (uint8_t i = 1; i < ok; i++) { if (phArr[i] < mn) mn = phArr[i]; if (phArr[i] > mx) mx = phArr[i]; }
+    phSpread = mx - mn; }
+
+  // 1) ตรวจหลุดโลก → bad
+  const char *badField = NULL;
+  if      (d.moisture < LIM_MOIST_MIN || d.moisture > LIM_MOIST_MAX) badField = "moisture";
+  else if (d.temperature < LIM_TEMP_MIN || d.temperature > LIM_TEMP_MAX) badField = "temperature";
+  else if (d.ec < LIM_EC_MIN || d.ec > LIM_EC_MAX)   badField = "ec";
+  else if (d.ph < LIM_PH_MIN || d.ph > LIM_PH_MAX)   badField = "ph";
+  else if (d.nitrogen < LIM_NPK_MIN || d.nitrogen > LIM_NPK_MAX
+        || d.phosphorus < LIM_NPK_MIN || d.phosphorus > LIM_NPK_MAX
+        || d.potassium < LIM_NPK_MIN || d.potassium > LIM_NPK_MAX) badField = "npk";
+  if (badField) {
+    d.valid = false; d.quality = 2;
+    snprintf(d.reason, sizeof(d.reason), "out_of_range:%s", badField);
+    return d;
+  }
+
+  // 2) ตรวจน่าสงสัย → suspect แต่ยัง valid
+  const char *sus = NULL;
+  if      (d.temperature > SUS_TEMP_MAX)           sus = "suspect:temp_high";
+  else if (d.ec > SUS_EC_MAX)                      sus = "suspect:ec_high";
+  else if (d.ph < SUS_PH_LO || d.ph > SUS_PH_HI)   sus = "suspect:ph_extreme";
+  else if (mSpread > 10.0 || tSpread > 5.0 || phSpread > 1.0) sus = "suspect:unstable";
+  if (sus) {
+    d.valid = true; d.quality = 1;
+    snprintf(d.reason, sizeof(d.reason), "%s", sus);
+    return d;
+  }
+
+  d.valid = true; d.quality = 0;
+  snprintf(d.reason, sizeof(d.reason), "ok");
   return d;
+}
+
+static const char* qualityStr(uint8_t q) {
+  return q == 0 ? "good" : (q == 1 ? "suspect" : "bad");
 }
 
 // ── Upload to Cloud (POST /api/readings) ──────────────────
@@ -104,8 +215,8 @@ void uploadReading() {
     return;
   }
   if (!lastData.valid) {
-    Serial.println("[Cloud] ยังไม่มีค่าจากเซ็นเซอร์ — ข้ามการส่ง");
-    return;
+    Serial.printf("[Cloud] ค่าไม่ valid (%s) — ยังส่งพร้อม flag เพื่อให้ backend ปฏิเสธ/บันทึกอย่างถูกต้อง\n", lastData.reason);
+    // ไม่ return — ส่ง valid=false ขึ้นไปให้ backend ตอบ 422 (กัน dashboard เข้าใจผิดว่าค่าสด)
   }
 
   WiFiClientSecure client;
@@ -128,7 +239,9 @@ void uploadReading() {
   body += "\"n\":"           + String(lastData.nitrogen)       + ",";
   body += "\"p\":"           + String(lastData.phosphorus)     + ",";
   body += "\"k\":"           + String(lastData.potassium)      + ",";
-  body += "\"valid\":"       + String(lastData.valid ? "true" : "false");
+  body += "\"valid\":"       + String(lastData.valid ? "true" : "false") + ",";
+  body += "\"quality\":\""  + String(qualityStr(lastData.quality)) + "\",";
+  body += "\"reason\":\""   + String(lastData.reason) + "\"";
   body += "}";
 
   int code = http.POST(body);
@@ -155,7 +268,9 @@ void handleData() {
   json += "\"n\":"           + String(lastData.nitrogen)       + ",";
   json += "\"p\":"           + String(lastData.phosphorus)     + ",";
   json += "\"k\":"           + String(lastData.potassium)      + ",";
-  json += "\"valid\":"       + String(lastData.valid ? "true" : "false");
+  json += "\"valid\":"       + String(lastData.valid ? "true" : "false") + ",";
+  json += "\"quality\":\""   + String(qualityStr(lastData.quality)) + "\",";
+  json += "\"reason\":\""    + String(lastData.reason) + "\"";
   json += "}";
 
   server.send(200, "application/json", json);
@@ -182,7 +297,14 @@ void printSerial(const SoilData& d) {
   Serial.printf( "│ K           : %6d mg/kg\n", d.potassium);
   Serial.printf( "│ WiFi        : %s\n",
     WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "ไม่ได้เชื่อมต่อ");
+  Serial.printf( "│ quality     : %s (%s)\n", qualityStr(d.quality), d.reason);
   Serial.println("└────────────────────────────────┘");
+
+  if (!d.valid) {
+    Serial.printf(">> [SENSOR-ERROR] ค่าไม่น่าเชื่อถือ (%s) — ตรวจสอบสาย RS485/ไฟเลี้ยง/การจุ่ม probe\n", d.reason);
+    return;
+  }
+  if (d.quality == 1) Serial.printf(">> [SUSPECT] %s — ค่าแปลกแต่ยังแสดงผล\n", d.reason);
 
   if      (d.moisture < 30) Serial.println(">> [แจ้งเตือน] ดินแห้ง — ควรรดน้ำ");
   else if (d.moisture > 80) Serial.println(">> [แจ้งเตือน] ดินชื้นเกินไป");
@@ -261,11 +383,12 @@ void loop() {
     lastRead = millis();
 
     SoilData d = readSensor();
+    lastData = d;  // อัปเดตเสมอ — รวม valid=false เพื่อให้เว็บรู้ว่าเซ็นเซอร์เสีย (ไม่เงียบใช้ค่าเก่า)
     if (d.valid) {
-      lastData = d;
       printSerial(d);
     } else {
-      Serial.println("[ERROR] Modbus fail — ใช้ค่าเดิม");
+      printSerial(d);
+      Serial.printf("[ERROR] %s — แจ้งเว็บเป็น sensor-error\n", d.reason);
     }
     Serial.println();
   }

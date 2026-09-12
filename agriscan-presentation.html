@@ -965,8 +965,8 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
             <ul class="check">
               <li>รับ HTTP request ผ่าน <code class="inline">server.handleClient()</code> ตลอดเวลา</li>
               <li>ตรวจ WiFi ถ้าหลุด → <b>reconnect อัตโนมัติ</b></li>
-              <li>อ่านค่าเซ็นเซอร์ผ่าน Modbus (<code class="inline">readHoldingRegisters(0x0000, 7)</code>) ทุก 3 วินาที</li>
-              <li>อ่านสำเร็จ → อัปเดตค่า / ไม่สำเร็จ → <b>ใช้ค่าเดิม</b> (ระบบทนทานต่อการขาดการติดต่อชั่วคราว)</li>
+              <li>อ่านค่าเซ็นเซอร์ผ่าน Modbus (<code class="inline">readHoldingRegisters(0x0000, 7)</code>) ทุก 3 วินาที — <b>อ่าน 5 ครั้งเอา median</b> (คั่น 80ms) กันค่าสวิง + บวก <b>calibration offset</b> (<code class="inline">CAL_PH</code> ฯลฯ)</li>
+              <li>ตรวจช่วงฟิสิกส์ (ชื้น 0–100 · อุณหภูมิ −10–60 · EC 0–20000 · pH 0–14 · NPK 0–1999): หลุด → <b>valid=false + reason</b> แจ้งเว็บเป็น <b>sensor-error</b> (ไม่เงียบใช้ค่าเก่า) · แปลกแต่เป็นไปได้ (ร้อน&gt;50/EC&gt;5000/pH นอก 3–10/ค่าสวิง) → <b>quality=suspect</b></li>
               <li>POST ค่าจริงขึ้นคลาวด์ทุก <b>3 วินาที</b> — สำเร็จ (201) / ล้มเหลว → ลองใหม่รอบถัดไป</li>
             </ul>
           </div>
@@ -991,7 +991,8 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
 <pre><span class="c">// ESP32 → Render (ทุก 3 วินาที) · dashboard GET /api/latest เห็นค่านี้</span>
 { <span class="k">"moisture"</span>: <span class="n">45.2</span>, <span class="k">"temperature"</span>: <span class="n">28.5</span>, <span class="k">"ec"</span>: <span class="n">320</span>,
   <span class="k">"ph"</span>: <span class="n">6.8</span>, <span class="k">"n"</span>: <span class="n">45</span>, <span class="k">"p"</span>: <span class="n">32</span>, <span class="k">"k"</span>: <span class="n">89</span>,
-  <span class="k">"valid"</span>: <span class="n">true</span> }</pre>
+  <span class="k">"valid"</span>: <span class="n">true</span>, <span class="k">"quality"</span>: <span class="s">"good"</span>, <span class="k">"reason"</span>: <span class="s">"ok"</span> }
+<span class="c">// quality: good/suspect/bad · reason: ok/modbus_timeout/out_of_range:&lt;field&gt;/suspect:* — ค่าเสีย backend ตอบ 422 ไม่เก็บ</span></pre>
       <div class="callout ok reveal">
         <span class="t">ตัวอย่าง Serial Monitor</span>
         ทุกครั้งที่อ่านค่าได้ ESP32 จะพิมพ์ตารางค่า + สถานะ เช่น <code class="inline">[Cloud] POST 201 → {"success":true}</code> และคำเตือนเช่น <code class="inline">&gt;&gt; [แจ้งเตือน] ดินแห้ง — ควรรดน้ำ</code>
@@ -1013,11 +1014,11 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
         <div class="c-title">บนหน้าจอมีอะไรบ้าง</div>
         <div class="c-desc" style="margin-top:8px;">
           <ul class="check">
-            <li><b>Header:</b> โลโก้, สถานะออนไลน์/ออฟไลน์/ข้อมูลเก่า (ไฟกระพริบ), เวลาอัปเดตล่าสุด, ป้ายที่อยู่ที่เชื่อมต่อ (คลิกเปลี่ยนได้), <b>ป้ายแหล่งข้อมูล</b> (🟢 ESP32 ท้องถิ่น · ข้อมูลสด / ☁️ คลาวด์ / 🟡 ข้อมูลเก่า X นาที)</li>
+            <li><b>Header:</b> โลโก้, สถานะออนไลน์/ออฟไลน์/ข้อมูลเก่า/<b>เซ็นเซอร์ผิดปกติ (แดง)</b> (ไฟกระพริบ), เวลาอัปเดตล่าสุด, ป้ายที่อยู่ที่เชื่อมต่อ (คลิกเปลี่ยนได้), <b>ป้ายแหล่งข้อมูล</b> (🟢 ESP32 ท้องถิ่น · ข้อมูลสด / ☁️ คลาวด์ / 🟡 ข้อมูลเก่า X นาที / 🟡 ค่าน่าสงสัย / 🔴 เซ็นเซอร์ผิดปกติ + เหตุผล)</li>
             <li><b>การ์ดเซ็นเซอร์ 5 ใบ:</b> ความชื้น (progress bar สีเปลี่ยนตามสถานะ), อุณหภูมิ, EC, pH, NPK (กราฟแท่ง 3 สี)</li>
             <li><b>เลือกชนิดพืช:</b> dropdown ข้าว 🌾 / ข้าวโพด 🌽 / ยางพารา 🌳 / ลำไย / ลิ้นจี่ / ทุเรียน / มังคุด / มันสำปะหลัง / มันฝรั่ง / หอมหัวใหญ่ / กระเทียม / พุทรา / แตงโม / ฟักทอง / ผักสวนครัว / ส้มโอ / ฝรั่ง / อื่นๆ 🌿 — เกณฑ์คำแนะนำเปลี่ยนตามพืชที่เลือก</li>
             <li><b>คำแนะนำอัตโนมัติ:</b> การ์ดวิเคราะห์ค่าแต่ละตัวแบบ real-time ตามเกณฑ์ของพืชที่เลือก (ดูตารางด้านล่าง)</li>
-            <li><b>Banner:</b> แจ้ง "กำลังเชื่อมต่อ" และสถานะ offline — ไม่มีข้อมูลจำลอง</li>
+            <li><b>Banner:</b> แจ้ง "กำลังเชื่อมต่อ", สถานะ offline — ไม่มีข้อมูลจำลอง — และ <b>🔴 "เซ็นเซอร์ผิดปกติ + เหตุผล"</b> (ค่าเสียจะไม่ทับค่าดีล่าสุด ไม่สร้างคำแนะนำมั่ว การ์ดเทาลง)</li>
             <li><b>ลูกเล่น:</b> ตัวเลขอัปเดตนิ่ง ๆ (ไม่กระพริบ — เขียน DOM เฉพาะเมื่อค่าเปลี่ยน), skeleton loading, ปุ่มรีเฟรช, ป้ายเวอร์ชัน Ⓥ ที่ header</li>
             <li><b>รองรับทุกขนาดหน้าจอ (Responsive):</b> ปรับสเกลอัตโนมัติตั้งแต่จอมือถือแคบ (เรียง 1 คอลัมน์ ตัวเลขอัดสเกลให้ไม่ล้น) จนถึงแท็บเล็ต/จอกว้าง — แตะง่ายบนมือถือ บ้านสัดส่วนบนจอใหญ่</li>
           </ul>
@@ -1071,7 +1072,7 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
     <div class="grid3">
       <div class="card reveal">
         <div class="c-big">POST /api/readings</div>
-        <div class="c-desc" style="margin-top:6px;">รับค่าจาก ESP32 (ต้องมี header <code class="inline">X-API-Key</code>) → บันทึกลง PostgreSQL → <b>201</b> / key ผิด <b>401</b> / ไม่ครบ <b>400</b></div>
+        <div class="c-desc" style="margin-top:6px;">รับค่าจาก ESP32 (ต้องมี header <code class="inline">X-API-Key</code>) → <b>ตรวจช่วงฟิสิกส์ซ้ำฝั่ง server</b> หลุดโลก → <b>422</b> ไม่เก็บ (กันค่ามั่วลง DB/ยิง LINE) · แปลกแต่เป็นไปได้ → เก็บพร้อม <code class="inline">quality=suspect</code> → บันทึกลง PostgreSQL → <b>201</b> / key ผิด <b>401</b> / ไม่ครบ <b>400</b></div>
       </div>
       <div class="card reveal">
         <div class="c-big">GET /api/latest</div>
@@ -1102,6 +1103,8 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
               <tr><td class="mono">ph</td><td class="mono">REAL</td></tr>
               <tr><td class="mono">n · p · k</td><td class="mono">INTEGER</td></tr>
               <tr><td class="mono">valid</td><td class="mono">BOOLEAN</td></tr>
+              <tr><td class="mono">quality</td><td class="mono">TEXT — good/suspect/bad (กันค่ามั่ว: bad ถูก reject ตั้งแต่ POST)</td></tr>
+              <tr><td class="mono">reason</td><td class="mono">TEXT — ok/modbus_timeout/out_of_range:&lt;field&gt;/suspect:* (โชว์บน dashboard + ข้าม LINE เมื่อ bad)</td></tr>
               <tr><td class="mono">created_at</td><td class="mono">TIMESTAMPTZ (auto)</td></tr>
               <tr><td class="mono">alert_state</td><td class="mono">TABLE แยก — alert_key PK · severity · last_sent_at (กันส่ง LINE ซ้ำ)</td></tr>
             </tbody>
@@ -1200,7 +1203,7 @@ curl http://localhost:5000/api/latest   <span class="c"># → ค่าล่า
           <li><b>ติดตั้งง่าย:</b> ไม่มี build step, ไม่มี framework — deploy ผ่าน render.yaml อัตโนมัติ (Web + DB)</li>
           <li><b>ข้อมูลจริงเท่านั้น:</b> ไม่มี mock data — ค่าที่แสดงมาจากเซ็นเซอร์จริง เก็บประวัติใน PostgreSQL</li>
           <li><b>เกณฑ์อ้างอิงทางการ:</b> P/K/EC/pH ตามเกณฑ์กรมพัฒนาที่ดิน พร้อมแหล่งอ้างอิง และ <b>เลือกชนิดพืชได้</b> (18 ชนิด: ข้าว/ข้าวโพด/ยางพารา/ลำไย/ลิ้นจี่/ทุเรียน/มังคุด/มันสำปะหลัง/มันฝรั่ง/หอมหัวใหญ่/กระเทียม/พุทรา/แตงโม/ฟักทอง/ผักสวนครัว/ส้มโอ/ฝรั่ง/อื่นๆ) เกณฑ์เปลี่ยนตามพืช</li>
-          <li><b>ทนทาน:</b> อ่านเซ็นเซอร์ไม่สำเร็จใช้ค่าเดิม, WiFi หลุด reconnect อัตโนมัติ, fallback chain 7 ระดับ</li>
+          <li><b>ทนทาน + รู้ตัวเมื่อเพี้ยน:</b> median 5 ครั้ง + ตรวจช่วงฟิสิกส์ทั้ง ESP32 และ backend (หลุดโลก → reject 422/โชว์ sensor-error ไม่เงียบใช้ค่าเก่า), WiFi หลุด reconnect อัตโนมัติ, fallback chain 7 ระดับ</li>
           <li><b>ใช้งานง่าย:</b> UI ภาษาไทย + คำแนะนำบอกสูตรปุ๋ยเป็นตัวเลขชัดเจน</li>
           <li><b>แจ้งเตือน LINE:</b> backend ยิง push เองแม้ปิดเบราว์เซอร์ — เกณฑ์เดียวกับหน้าเว็บ รวมทุกหัวข้อเป็นข้อความเดียวก่อนส่ง</li>
         </ul>
@@ -1214,6 +1217,7 @@ curl http://localhost:5000/api/latest   <span class="c"># → ค่าล่า
           <li><b>ต้องซิงค์ 2 ชุดด้วยมือ:</b> <code class="inline">dashboard.h</code> (ฝังใน ESP32) กับโฟลเดอร์ <code class="inline">dashboard/</code></li>
           <li><b>ความปลอดภัยแบบเบา:</b> API key กันการส่งข้อมูลปลอม แต่ CORS ยังเปิดและ key ฝังใน firmware</li>
           <li><b>ค่า N (mg/kg) ไม่มีเกณฑ์ทางการ:</b> กรมฯ วัด N เป็น % — ค่าจากเซ็นเซอร์เป็นเพียงค่าบ่งชี้</li>
+          <li><b>calibration ยังต้อง flash ใหม่:</b> offset ชดเชยเซ็นเซอร์ (<code class="inline">CAL_*</code>) อยู่ใน firmware — เปลี่ยนค่าต้อง re-flash (ยังไม่มีหน้าเว็บตั้งค่า)</li>
           <li><b>โควต้า LINE ฟรี 200 ข้อความ/เดือน:</b> กันเปลืองด้วย cooldown 60 นาที/หัวข้อ + รวมข้อความเป็นก้อนเดียว — ถ้าหลายแปลง/หลายคนต้องไป Phase 2 (multicast รายพืช)</li>
         </ul>
       </div>

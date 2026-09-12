@@ -103,7 +103,6 @@ async function fetchData() {
       state.online = true;
       state.isMock = false;
       state.retryCount = 0;
-      updateUI(json);
 
       // ── ตรวจแหล่งข้อมูล + อายุข้อมูล (กันเข้าใจผิดว่า ESP32 ออนไลน์ทั้งที่ข้อมูลเก่า) ──
       let host = '';
@@ -115,9 +114,14 @@ async function fetchData() {
         if (!isNaN(t)) age = Date.now() - t;
       }
       const stale = age !== null && age > CONFIG.staleAfter;
+      const sensorBad = json.valid === false || json.quality === 'bad';
 
-      setStatus(stale ? 'stale' : 'online');
-      updateSourceBadge(isCloud, stale, age);
+      updateUI(json);   // updateUI รู้จัก valid/quality — ค่าเสียจะไม่ทับค่าเก่าดีๆ
+
+      if (sensorBad)      setStatus('sensor-error');
+      else if (stale)     setStatus('stale');
+      else                setStatus('online');
+      updateSourceBadge(isCloud, stale, age, json.quality, json.reason, sensorBad);
       hideBanners();
 
       try {
@@ -159,7 +163,40 @@ function changeIp() {
 }
 
 // ─── Update UI ────────────────────────────────────────────
+// ค่าเสีย (valid=false / quality=bad) → ไม่ทับค่าเก่า ไม่สร้างคำแนะนำมั่ว
+// แค่โชว์แบนเนอร์ sensor-error พร้อมเหตุผล แล้ว return
+const REASON_TH = {
+  'ok': 'ปกติ',
+  'modbus_timeout': 'อ่านเซ็นเซอร์ไม่ติด (Modbus timeout) — เช็คสาย RS485/ไฟเลี้ยง',
+  'sensor_unstable': 'ค่าสวิงระหว่างอ่าน — เช็คการจุ่ม probe/สัญญาณรบกวน',
+  'suspect:unstable': 'ค่าค่อนข้างสวิง — เฝ้าระวัง',
+  'suspect:temp_high': 'อุณหภูมิสูงผิดปกติ — เฝ้าระวัง',
+  'suspect:ec_high': 'EC สูงผิดปกติ — เฝ้าระวัง',
+  'suspect:ph_extreme': 'pH อยู่ขอบสุด — เฝ้าระวัง'
+};
+function reasonTh(r) {
+  if (!r) return '';
+  if (REASON_TH[r]) return REASON_TH[r];
+  if (r.startsWith('out_of_range:')) return `ค่าหลุดโลก (${r.split(':')[1]}) — เซ็นเซอร์/สายอาจมีปัญหา`;
+  if (r.startsWith('suspect:')) return `น่าสงสัย (${r.split(':')[1]}) — เฝ้าระวัง`;
+  if (r.startsWith('missing:')) return `ขาดค่า ${r.split(':')[1]}`;
+  return r;
+}
+
 function updateUI(d) {
+  // ── การ์ดเสีย: อย่าเชื่อค่าใหม่ ──
+  if (d.valid === false || d.quality === 'bad') {
+    setStatus('sensor-error');
+    showSensorBanner(reasonTh(d.reason || 'invalid'));
+    document.getElementById('cards-grid')?.classList.add('sensor-bad');
+    return;
+  }
+  document.getElementById('cards-grid')?.classList.remove('sensor-bad');
+  hideSensorBanner();
+  // suspect: โชว์ค่าต่อ แต่ติดป้ายเหลือง
+  if (d.quality === 'suspect') showSuspectChip(reasonTh(d.reason || 'suspect'));
+  else hideSuspectChip();
+
   state.data = d;
   const crop = getCrop();
   const c = crop; // shorthand
@@ -346,6 +383,8 @@ function setStatus(mode) {
     text.textContent = 'ออนไลน์';
   } else if (mode === 'stale') {
     text.textContent = 'ออนไลน์ (ข้อมูลเก่า)';
+  } else if (mode === 'sensor-error') {
+    text.textContent = 'เซ็นเซอร์ผิดปกติ';
   } else if (mode === 'offline') {
     text.textContent = state.isMock ? 'ออฟไลน์ (Mock)' : 'ออฟไลน์';
   } else {
@@ -355,7 +394,7 @@ function setStatus(mode) {
 
 // ─── แหล่งข้อมูล + อายุข้อมูล (badge แยกจากสถานะออนไลน์/ออฟไลน์) ──
 // isCloud: true = คลาวด์ Render · false = ESP32 ท้องถิ่น · null = ไม่มีข้อมูล
-function updateSourceBadge(isCloud, stale, age) {
+function updateSourceBadge(isCloud, stale, age, quality, reason, sensorBad) {
   const el = $('source-badge');
   if (!el) return;
 
@@ -365,15 +404,43 @@ function updateSourceBadge(isCloud, stale, age) {
     return;
   }
 
+  if (sensorBad) {
+    el.className = 'source-badge sensor-bad';
+    el.textContent = `🔴 เซ็นเซอร์ผิดปกติ · ${reasonTh(reason)}`;
+    return;
+  }
+
   const source = isCloud ? 'คลาวด์' : 'ESP32 ท้องถิ่น';
   if (stale) {
     el.className = 'source-badge stale';
     el.textContent = `🟡 ${source} · ข้อมูลเก่า ${formatAge(age)}`;
+  } else if (quality === 'suspect') {
+    el.className = 'source-badge suspect';
+    el.textContent = `🟡 ${source} · ค่าน่าสงสัย (${reasonTh(reason)})`;
   } else {
     el.className = 'source-badge fresh';
     el.textContent = isCloud ? '☁️ คลาวด์ · ข้อมูลสด' : '🟢 ESP32 ท้องถิ่น · ข้อมูลสด';
   }
 }
+
+// ─── แบนเนอร์เซ็นเซอร์ผิดปกติ + ป้าย suspect (กันเข้าใจผิดว่าค่าจริง) ──
+function showSensorBanner(msg) {
+  let el = $('sensor-banner');
+  if (el) {
+    el.classList.add('visible');
+    const t = $('sensor-text');
+    if (t) t.textContent = `⚠️ เซ็นเซอร์ผิดปกติ — ${msg} · กำลังแสดงค่าดีล่าสุดค้างไว้`;
+  }
+}
+function hideSensorBanner() {
+  $('sensor-banner')?.classList.remove('visible');
+}
+function showSuspectChip(msg) {
+  let el = $('source-badge');
+  void el; void msg;
+  // ข้อความ suspect แสดงใน source-badge แล้ว (updateSourceBadge) — ไม่ต้องแตะ DOM เพิ่ม
+}
+function hideSuspectChip() {}
 
 function formatAge(ms) {
   if (ms == null) return '';
