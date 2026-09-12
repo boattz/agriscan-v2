@@ -69,23 +69,29 @@ def push_text(to_id, text, timeout=10):
                  timeout=timeout)
 
 
-def broadcast_text(text, timeout=10):
-    """ส่งหาผู้ติดตาม OA ทุกคน (ง่ายสุดสำหรับ Phase 1)"""
+def multicast_text(user_ids, text, timeout=10):
+    """ส่งหาผู้ลงทะเบียนหลายคน (chunk ละ 500 ตาม limit LINE)"""
+    ids = list(dict.fromkeys([u for u in (user_ids or []) if u]))
+    if not ids:
+        return False, {"error": "no subscribers"}
     if is_dry_run():
-        print(f"[LINE][DRY-RUN] broadcast: {text[:200]}")
-        return True, {"dry_run": True}
+        print(f"[LINE][DRY-RUN] multicast -> {len(ids)} subs: {text[:200]}")
+        return True, {"dry_run": True, "count": len(ids)}
     if not get_token():
         print("[LINE] ยังไม่ตั้ง LINE_CHANNEL_ACCESS_TOKEN — ข้ามการส่ง")
         return False, {"error": "LINE_CHANNEL_ACCESS_TOKEN not set"}
-    return _post("/broadcast", {"messages": [{"type": "text", "text": text}]},
-                 timeout=timeout)
-
-
-def send_text(text, mode="broadcast", target_id="", timeout=10):
-    """จุดเข้าเดียว — mode: 'broadcast' หรือ 'push'"""
-    if mode == "push":
-        return push_text(target_id, text, timeout=timeout)
-    return broadcast_text(text, timeout=timeout)
+    sent = 0
+    for i in range(0, len(ids), 500):
+        ok, info = _post(
+            "/multicast",
+            {"to": ids[i:i + 500],
+             "messages": [{"type": "text", "text": text[:4900]}]},
+            timeout=timeout,
+        )
+        if not ok:
+            return False, info
+        sent += len(ids[i:i + 500])
+    return True, {"count": sent}
 
 
 def reply_text(reply_token, text, timeout=10):

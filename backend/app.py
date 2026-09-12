@@ -44,16 +44,15 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 # เก็บข้อมูลกี่วันแล้วลบทิ้งอัตโนมัติ (กัน database เต็ม) — ตั้งผ่าน env RETAIN_DAYS
 RETAIN_DAYS = int(os.environ.get("RETAIN_DAYS", "7"))
 
-# ── LINE Alerts (Phase 1: พืชเดียวกลาง + broadcast/push) ─────
+# ── LINE Alerts (พืชเดียวกลาง + ส่งหาผู้ลงทะเบียน) ───────────
 # เกณฑ์พืชที่ใช้ตัดสิน — key ตาม dashboard/crops.js (เช่น rice, corn, other)
 ALERT_CROP = os.environ.get("ALERT_CROP", "other")
 # ความรุนแรงขั้นต่ำที่จะส่ง: warn = เอาหมด, alert = เฉพาะวิกฤต
 ALERT_MIN_SEVERITY = os.environ.get("ALERT_MIN_SEVERITY", "warn")
 # กันสแปม: alert เดิมส่งซ้ำได้ทุกกี่นาที (โควต้า Messaging API ฟรี 200/เดือน)
 ALERT_COOLDOWN_MIN = int(os.environ.get("ALERT_COOLDOWN_MIN", "60"))
-# เป้าหมาย: broadcast = ผู้ติดตาม OA ทุกคน · push = ส่งหา LINE_TARGET_ID เดียว
-LINE_TARGET_MODE = os.environ.get("LINE_TARGET_MODE", "broadcast")
-LINE_TARGET_ID = os.environ.get("LINE_TARGET_ID", "")
+# ส่งให้ใคร: ผู้ลงทะเบียนในตาราง line_subscribers ทุกคน (multicast)
+# ลงทะเบียนโดยแอด OA แล้วทักแชท 1 ครั้ง (webhook เก็บ userId ให้เอง)
 # Channel secret (Developers Console -> Messaging API) - ใช้ตรวจ webhook signature
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 # ลิงก์เพิ่มเพื่อน OA (เช่น https://lin.ee/xxxxxxx) + URL สาธารณะของ dashboard
@@ -261,10 +260,26 @@ def _mark_sent(alert_key, severity):
         print("[Alert] บันทึก alert_state ล้มเหลว:", e)
 
 
+def _get_active_subscriber_ids():
+    """userId ผู้รับ alert (active) — ไม่มีใคร = ยังไม่ส่ง"""
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT line_user_id FROM line_subscribers WHERE active = "
+                + ("TRUE" if DATABASE_URL else "1")
+            )
+            return [r["line_user_id"] for r in cur.fetchall()
+                    if r["line_user_id"]]
+    except Exception as e:
+        print("[Alert] อ่าน subscribers ล้มเหลว:", e)
+        return []
+
+
 def evaluate_and_notify(reading):
     """ประเมิน 1 reading แล้วส่ง LINE (รันใน background thread — ห้ามบล็อก API)
 
     กติกันสแปม: ส่งเฉพาะ alert ที่พ้น cooldown แล้ว รวมเป็นข้อความเดียว
+    ส่งหาเฉพาะผู้ลงทะเบียน (multicast) — ไม่มีผู้รับ = ข้าม ไม่ยิง broadcast
     """
     crop_key = alerts.get_crop_key(ALERT_CROP)
     items = alerts.filter_by_severity(
@@ -277,18 +292,25 @@ def evaluate_and_notify(reading):
         return {"sent": False, "reason": "cooldown",
                 "suppressed": [i["key"] for i in items]}
 
+    user_ids = _get_active_subscriber_ids()
+    if not user_ids:
+        print("[Alert] มี alert แต่ยังไม่มีผู้ลงทะเบียน — ข้ามการส่ง "
+              "(แอด OA แล้วทักแชท 1 ครั้งเพื่อลงทะเบียน)")
+        return {"sent": False, "reason": "no subscribers",
+                "keys": [i["key"] for i in fresh]}
+
     crop = alerts.get_crop(crop_key)
     now_str = datetime.now().strftime("%H:%M:%S")
     text = alerts.format_line_message(
         crop["label"], crop["icon"], fresh,
         dashboard_url=DASHBOARD_PUBLIC_URL, time_str=now_str)
 
-    ok, info = line_notify.send_text(
-        text, mode=LINE_TARGET_MODE, target_id=LINE_TARGET_ID)
+    ok, info = line_notify.multicast_text(user_ids, text)
     if ok:
         for i in fresh:
             _mark_sent(i["key"], i["severity"])
-        print(f"[Alert] ส่ง LINE แล้ว {len(fresh)} รายการ ({LINE_TARGET_MODE})")
+        print(f"[Alert] ส่ง LINE แล้ว {len(fresh)} รายการ "
+              f"-> {info.get('count', 0)} คน")
     return {"sent": ok, "count": len(fresh),
             "keys": [i["key"] for i in fresh], "info": info}
 
@@ -438,8 +460,13 @@ def alerts_test():
     if request.args.get("dry") == "1":
         return jsonify({"sent": False, "dry": True, "preview": text})
 
-    ok, info = line_notify.send_text(
-        text, mode=LINE_TARGET_MODE, target_id=LINE_TARGET_ID)
+    user_ids = _get_active_subscriber_ids()
+    if not user_ids:
+        return jsonify({"sent": False, "preview": text,
+                        "reason": "ยังไม่มีผู้ลงทะเบียน — "
+                                  "แอด OA แล้วทักแชท 1 ครั้งก่อน"}), 400
+
+    ok, info = line_notify.multicast_text(user_ids, text)
     if ok:
         _mark_sent("manual_test", "warn")
     return jsonify({"sent": ok, "preview": text, "info": info})
@@ -480,7 +507,7 @@ def alerts_status():
     return jsonify({
         "line_configured": line_notify.is_configured(),
         "dry_run": line_notify.is_dry_run(),
-        "target_mode": LINE_TARGET_MODE,
+        "target": "subscribers",
         "crop": crop_key,
         "crop_label": f"{crop['icon']} {crop['label']}",
         "min_severity": ALERT_MIN_SEVERITY,
