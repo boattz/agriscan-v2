@@ -1085,7 +1085,7 @@ render.yaml      <span class="cmt">← deploy Render: Web + PostgreSQL อัต
 
     <div class="card reveal" style="margin-top:18px;">
       <div class="c-big">🔔 แจ้งเตือน LINE (Messaging API)</div>
-      <div class="c-desc" style="margin-top:6px;">backend ประเมินค่าทุก reading ด้วยเกณฑ์รายพืชชุดเดียวกับ dashboard (<code class="inline">backend/alerts.py</code> mirror <code class="inline">crops.js</code>) → รวมทุกหัวข้อเป็นข้อความเดียวยิงผ่าน LINE OA (push/broadcast) แม้ปิดเบราว์เซอร์ — กันสแปมด้วยตาราง <code class="inline">alert_state</code> (cooldown 60 นาที/หัวข้อ · ปุ่มทดสอบ 10 นาที) · โควต้าฟรี 200 ข้อความ/เดือน · endpoints: <code class="inline">POST /api/alerts/test</code> + <code class="inline">GET /api/alerts/status</code></div>
+      <div class="c-desc" style="margin-top:6px;">backend ประเมินค่าทุก reading ด้วยเกณฑ์รายพืชชุดเดียวกับ dashboard (<code class="inline">backend/alerts.py</code> mirror <code class="inline">crops.js</code>) → รวมทุกหัวข้อเป็นข้อความเดียวยิงผ่าน LINE OA (push/broadcast) แม้ปิดเบราว์เซอร์ — กันสแปมด้วยตาราง <code class="inline">alert_state</code> (cooldown 60 นาที/หัวข้อ · ปุ่มทดสอบ 10 นาที) · ลงทะเบียนผู้รับผ่าน <code class="inline">POST /api/line/webhook</code> (เก็บ userId + ตอบยืนยัน — push หา userId ถึงชัวร์กว่า broadcast) · โควต้าฟรี 200 ข้อความ/เดือน · endpoints: <code class="inline">POST /api/alerts/test</code> + <code class="inline">GET /api/alerts/status</code></div>
     </div>
 
     <div class="grid2" style="margin-top:18px;">

@@ -436,16 +436,19 @@ async function fetchLineStatus() {
     }
     let staleTxt = '';
     if (s.stale) staleTxt = ' · ⚠ ESP32 เงียบเกิน 10 นาที';
+    let subTxt = '';
+    if (s.subscribers > 0) subTxt = ` · 👥 ผู้รับ ${s.subscribers} คน`;
+    else if (s.line_configured || s.dry_run) subTxt = ' · 👥 ยังไม่มีผู้ลงทะเบียน (แอด OA แล้วทักมา 1 ข้อความ)';
 
     if (!s.line_configured && !s.dry_run) {
       title.textContent = '🔕 ยังไม่เปิดใช้งาน LINE';
       desc.textContent = `ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN บน Render ก่อน (เกณฑ์ ${s.crop_label}) · ${lastTxt}`;
     } else if (s.dry_run) {
       title.textContent = '🧪 โหมดทดสอบ (DRY-RUN — ยังไม่ยิงจริง)';
-      desc.textContent = `เกณฑ์ ${s.crop_label} · แจ้งขั้น ${s.min_severity} · cooldown ${s.cooldown_min} นาที · ${lastTxt}${staleTxt}`;
+      desc.textContent = `เกณฑ์ ${s.crop_label} · แจ้งขั้น ${s.min_severity} · cooldown ${s.cooldown_min} นาที · ${lastTxt}${staleTxt}${subTxt}`;
     } else {
       title.textContent = '🔔 แจ้งเตือน LINE เปิดใช้งานแล้ว';
-      desc.textContent = `เกณฑ์ ${s.crop_label} · แจ้งขั้น ${s.min_severity} · cooldown ${s.cooldown_min} นาที · ${lastTxt}${staleTxt}`;
+      desc.textContent = `เกณฑ์ ${s.crop_label} · แจ้งขั้น ${s.min_severity} · cooldown ${s.cooldown_min} นาที · ${lastTxt}${staleTxt}${subTxt}`;
     }
   } catch (err) {
     title.textContent = '🔕 เชื่อม backend ไม่ได้';

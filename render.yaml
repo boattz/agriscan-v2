@@ -18,6 +18,8 @@ services:
       # ── LINE Alerts (Phase 1) — ตั้งค่าจริงใน Render Dashboard ──
       - key: LINE_CHANNEL_ACCESS_TOKEN
         sync: false # Channel Access Token จาก LINE Developers → Messaging API
+      - key: LINE_CHANNEL_SECRET
+        sync: false # Channel secret (ตรวจ webhook signature) — ไม่ตั้งก็ใช้ได้
       - key: LINE_TARGET_MODE
         value: broadcast # broadcast = ผู้ติดตาม OA ทุกคน · push = ส่งหา LINE_TARGET_ID
       - key: LINE_TARGET_ID

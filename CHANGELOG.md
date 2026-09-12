@@ -12,6 +12,7 @@
 ## [Unreleased]
 ### Added
 - **แจ้งเตือน LINE (Phase 1)** — backend ประเมินค่าทุก reading ด้วย `backend/alerts.py` (mirror เกณฑ์ `crops.js` + กติกา `buildRecommendations`) แล้วยิง LINE OA Messaging API (push/broadcast) แม้ปิดเบราว์เซอร์ — กันสแปมด้วยตาราง `alert_state` (cooldown 60 นาที/หัวข้อ, ปุ่มทดสอบ 10 นาที) + endpoints `POST /api/alerts/test`, `GET /api/alerts/status` + การ์ด LINE บน dashboard + env ใหม่ใน `render.yaml` (เกณฑ์พืชเดียวกลางผ่าน `ALERT_CROP`, default `other`)
+- **LINE webhook ลงทะเบียนผู้รับ (แบบ Agriflow)** — `POST /api/line/webhook` เก็บ userId ลงตาราง `line_subscribers` + ตอบยืนยันกลับแชททันที (broadcast ไม่ยืนยันการถึง — push หา userId ที่ลงทะเบียนแล้วถึงชัวร์) + `GET /api/line/subscribers` (X-API-Key) + นับผู้รับบนการ์ด dashboard
 
 ### Changed
 - **เกณฑ์ NPK แยกรายพืช** — N/P/K thresholds ไม่ใช้ชุดเดียวทั้งระบบอีกต่อไป แต่ละพืชมีค่าของตัวเอง (เช่น ข้าวโพด/ผัก N สูง · มันสำปะหลัง/ทุเรียน/มันฝรั่ง K สูง · มันสำปะหลังทน N ต่ำ) — baseline อ้างอิง LDD ตาราง 15 (ระดับธาตุในดิน) แล้วปรับตามความต้องการธาตุแต่ละพืช

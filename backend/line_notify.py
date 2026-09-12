@@ -86,3 +86,55 @@ def send_text(text, mode="broadcast", target_id="", timeout=10):
     if mode == "push":
         return push_text(target_id, text, timeout=timeout)
     return broadcast_text(text, timeout=timeout)
+
+
+def reply_text(reply_token, text, timeout=10):
+    """ตอบกลับในแชท (ใช้ replyToken จาก webhook — ยืนยันช่องสองทางทันที)"""
+    if is_dry_run():
+        print(f"[LINE][DRY-RUN] reply: {text[:200]}")
+        return True, {"dry_run": True}
+    if not get_token():
+        return False, {"error": "LINE_CHANNEL_ACCESS_TOKEN not set"}
+    if not reply_token:
+        return False, {"error": "missing reply token"}
+    payload = {"replyToken": reply_token,
+               "messages": [{"type": "text", "text": text[:4900]}]}
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        API_BASE + "/reply", data=body,
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + get_token()},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            return True, {"status": res.status}
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            detail = ""
+        print(f"[LINE] reply HTTP {e.code}: {detail}")
+        return False, {"status": e.code, "detail": detail}
+    except Exception as e:
+        print(f"[LINE] reply ล้มเหลว: {e}")
+        return False, {"error": str(e)[:300]}
+
+
+def get_profile(user_id, timeout=10):
+    """ดึง display name (optional — ล้มเหลวก็คืน None)"""
+    if not get_token() or not user_id:
+        return None
+    req = urllib.request.Request(
+        f"https://api.line.me/v2/bot/profile/{user_id}",
+        headers={"Authorization": "Bearer " + get_token()},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            name = data.get("displayName")
+            return str(name)[:100] if name else None
+    except Exception as e:
+        print(f"[LINE] profile ล้มเหลว: {e}")
+        return None

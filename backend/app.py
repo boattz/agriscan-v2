@@ -11,9 +11,14 @@ Endpoints:
   GET  /health        → ตรวจสถานะ service + ฐานข้อมูล
   POST /api/alerts/test   → ส่งข้อความทดสอบเข้า LINE (กันสแปมด้วย cooldown)
   GET  /api/alerts/status → สถานะระบบแจ้งเตือน + alert ล่าสุด (ให้ dashboard)
+  POST /api/line/webhook  ← รับ event จาก LINE OA (เก็บ userId + ตอบยืนยัน)
+  GET  /api/line/subscribers → ดู userId ที่ลงทะเบียน (ต้องมี X-API-Key)
   GET  /              → เสิร์ฟหน้า dashboard
 """
 
+import base64
+import hashlib
+import hmac
 import os
 import sqlite3
 import threading
@@ -49,6 +54,8 @@ ALERT_COOLDOWN_MIN = int(os.environ.get("ALERT_COOLDOWN_MIN", "60"))
 # เป้าหมาย: broadcast = ผู้ติดตาม OA ทุกคน · push = ส่งหา LINE_TARGET_ID เดียว
 LINE_TARGET_MODE = os.environ.get("LINE_TARGET_MODE", "broadcast")
 LINE_TARGET_ID = os.environ.get("LINE_TARGET_ID", "")
+# Channel secret (Developers Console -> Messaging API) - ใช้ตรวจ webhook signature
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 # ลิงก์เพิ่มเพื่อน OA (เช่น https://lin.ee/xxxxxxx) + URL สาธารณะของ dashboard
 LINE_ADD_FRIEND_URL = os.environ.get("LINE_ADD_FRIEND_URL", "")
 DASHBOARD_PUBLIC_URL = os.environ.get(
@@ -110,12 +117,28 @@ if DATABASE_URL:
         last_sent_at TIMESTAMPTZ DEFAULT NOW()
     );
     """
+    LINE_SUBSCRIBERS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS line_subscribers (
+        line_user_id VARCHAR(50) PRIMARY KEY,
+        display_name VARCHAR(100),
+        active       BOOLEAN DEFAULT TRUE,
+        subscribed_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    """
 else:
     ALERT_STATE_SCHEMA = """
     CREATE TABLE IF NOT EXISTS alert_state (
         alert_key    TEXT PRIMARY KEY,
         severity     TEXT DEFAULT '',
         last_sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    LINE_SUBSCRIBERS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS line_subscribers (
+        line_user_id TEXT PRIMARY KEY,
+        display_name TEXT,
+        active       INTEGER DEFAULT 1,
+        subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
 
@@ -134,6 +157,7 @@ def init_db():
         with get_conn() as conn:
             conn.execute(SCHEMA)
             conn.execute(ALERT_STATE_SCHEMA)
+            conn.execute(LINE_SUBSCRIBERS_SCHEMA)
             conn.commit()
         print("[OK] Database พร้อมใช้งาน" + (" (PostgreSQL)" if DATABASE_URL else " (SQLite local)"))
     except Exception as e:
@@ -462,10 +486,144 @@ def alerts_status():
         "min_severity": ALERT_MIN_SEVERITY,
         "cooldown_min": ALERT_COOLDOWN_MIN,
         "add_friend_url": LINE_ADD_FRIEND_URL,
+        "subscribers": _count_subscribers(),
         "last_alerts": last_alerts,
         "latest_age_s": latest_age_s,
         "stale": stale,
     })
+
+
+# ── LINE webhook: เก็บ userId ผู้ติดตาม (แบบ Agriflow) ───────
+def _verify_line_signature(raw, signature):
+    """ตรวจ X-LINE-Signature — ไม่ตั้ง secret ถือว่าผ่าน (dev)"""
+    if not LINE_CHANNEL_SECRET:
+        return True
+    if not signature or not raw:
+        return False
+    mac = hmac.new(LINE_CHANNEL_SECRET.encode("utf-8"), raw,
+                   hashlib.sha256).digest()
+    try:
+        return hmac.compare_digest(
+            base64.b64encode(mac).decode(),
+            signature,
+        )
+    except Exception:
+        return False
+
+
+def _save_subscriber(user_id, active=True):
+    try:
+        with get_conn() as conn:
+            if DATABASE_URL:
+                conn.execute(
+                    "INSERT INTO line_subscribers (line_user_id, active, "
+                    "subscribed_at) VALUES (%s, %s, NOW()) "
+                    "ON CONFLICT (line_user_id) DO UPDATE SET active = "
+                    "EXCLUDED.active",
+                    (user_id, active),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO line_subscribers (line_user_id, active, "
+                    "subscribed_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT (line_user_id) DO UPDATE SET active = "
+                    "excluded.active",
+                    (user_id, 1 if active else 0),
+                )
+            conn.commit()
+    except Exception as e:
+        print("[Alert] บันทึก subscriber ล้มเหลว:", e)
+
+
+def _set_subscriber_name(user_id, name):
+    if not name:
+        return
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                f"UPDATE line_subscribers SET display_name = {PARAM} "
+                f"WHERE line_user_id = {PARAM}",
+                (name, user_id),
+            )
+            conn.commit()
+    except Exception as e:
+        print("[Alert] บันทึกชื่อ subscriber ล้มเหลว:", e)
+
+
+def _count_subscribers():
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT COUNT(*) AS c FROM line_subscribers WHERE active = "
+                + ("TRUE" if DATABASE_URL else "1")
+            )
+            row = cur.fetchone()
+            return int(row["c"]) if row else 0
+    except Exception:
+        return 0
+
+
+@app.route("/api/line/webhook", methods=["POST"])
+def line_webhook():
+    """รับ event จาก LINE OA → เก็บ userId + ตอบยืนยัน (ตอบ 200 เสมอ กัน retry-storm)"""
+    raw = request.get_data()
+    if not _verify_line_signature(raw, request.headers.get("X-Line-Signature")):
+        return jsonify({"error": "invalid signature"}), 403
+
+    data = request.get_json(silent=True) or {}
+    for ev in data.get("events", []):
+        src = ev.get("source", {}) or {}
+        user_id = src.get("userId") or src.get("groupId") or src.get("roomId")
+        if not user_id:
+            continue
+        etype = ev.get("type")
+
+        if etype in ("follow", "join"):
+            _save_subscriber(user_id, True)
+            _set_subscriber_name(user_id, line_notify.get_profile(user_id))
+            line_notify.reply_text(
+                ev.get("replyToken"),
+                "ลงทะเบียนรับแจ้งเตือน Agriscan สำเร็จ\n"
+                "alert รอบถัดไปจะส่งเข้าห้องแชทนี้\n"
+                "(พิมพ์อะไรก็ได้เพื่อทดสอบว่าบอทตอบ)",
+            )
+        elif etype in ("unfollow", "leave"):
+            _save_subscriber(user_id, False)
+        elif etype == "message":
+            msg = (ev.get("message") or {})
+            if msg.get("type") == "text":
+                _save_subscriber(user_id, True)
+                _set_subscriber_name(user_id, line_notify.get_profile(user_id))
+                line_notify.reply_text(
+                    ev.get("replyToken"),
+                    "รับทราบ (id ลงทะเบียนแล้ว)\n"
+                    "alert รอบถัดไปจะส่งเข้าห้องแชทนี้",
+                )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/line/subscribers", methods=["GET"])
+def line_subscribers():
+    """ดู userId ที่ลงทะเบียนไว้ (ต้องมี X-API-Key — กันคนนอก)"""
+    if request.headers.get("X-API-Key") != API_KEY:
+        return jsonify({"error": "unauthorized — X-API-Key ไม่ถูกต้อง"}), 401
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT line_user_id, display_name, active, subscribed_at "
+                "FROM line_subscribers ORDER BY subscribed_at DESC LIMIT 100"
+            )
+            subs = [
+                {"user_id": r["line_user_id"], "name": r["display_name"],
+                 "active": bool(r["active"]),
+                 "at": (r["subscribed_at"].isoformat()
+                        if isinstance(r["subscribed_at"], datetime)
+                        else r["subscribed_at"])}
+                for r in cur.fetchall()
+            ]
+    except Exception:
+        return jsonify({"error": "database unavailable"}), 503
+    return jsonify({"count": len(subs), "subscribers": subs})
 
 
 init_db()
