@@ -206,3 +206,195 @@ def format_line_message(crop_label, crop_icon, items, dashboard_url=None,
         lines.append(" · ".join(footer))
     text = "\n".join(lines)
     return text[:4900]  # กันเกิน limit 5000 ตัวอักษรของ LINE
+
+
+# ── Flex UI (การ์ดสวยในแชท LINE) ────────────────────────────
+def _flex_row(label, value, value_color="#111111"):
+    return {
+        "type": "box", "layout": "baseline", "spacing": "sm",
+        "contents": [
+            {"type": "text", "text": str(label), "size": "sm",
+             "color": "#8b9bb4", "flex": 0},
+            {"type": "text", "text": str(value), "size": "sm",
+             "color": value_color, "weight": "bold", "align": "end",
+             "wrap": True},
+        ],
+    }
+
+
+def _dashboard_button(dashboard_url):
+    if not dashboard_url:
+        return None
+    return {
+        "type": "button", "style": "primary", "height": "sm",
+        "action": {"type": "uri", "label": "เปิด Dashboard",
+                   "uri": dashboard_url},
+    }
+
+
+def format_flex_alert(crop_label, crop_icon, items, dashboard_url=None,
+                      time_str=None, max_items=8):
+    """การ์ดแจ้งเตือน (แดง = วิกฤต, เหลือง = เฝ้าระวัง, เขียว = ปกติ)"""
+    items = items[:max_items]
+    if not items:
+        accent, title = "#16a34a", "ค่าปกติ"
+        alt = f"Agriscan: {crop_label} ค่าปกติ"
+    elif any(i["severity"] == "alert" for i in items):
+        accent, title = "#ef4444", f"{crop_icon} {crop_label} ผิดปกติ"
+        alt = f"Agriscan แจ้งเตือน {crop_label}: " + ", ".join(
+            i["title"] for i in items)[:350]
+    else:
+        accent, title = "#f59e0b", f"{crop_icon} {crop_label} เฝ้าระวัง"
+        alt = f"Agriscan เฝ้าระวัง {crop_label}: " + ", ".join(
+            i["title"] for i in items)[:350]
+
+    body = []
+    if not items:
+        body.append({"type": "text", "text": "ทุกค่าอยู่ในเกณฑ์",
+                     "size": "md", "weight": "bold", "color": "#16a34a",
+                     "align": "center"})
+    for it in items:
+        dot = "#ef4444" if it["severity"] == "alert" else "#f59e0b"
+        body.append({
+            "type": "box", "layout": "horizontal", "spacing": "sm",
+            "contents": [
+                {"type": "text", "text": "●", "size": "sm",
+                 "color": dot, "flex": 0},
+                {"type": "box", "layout": "vertical", "flex": 1,
+                 "contents": [
+                     {"type": "text", "text": f"{it['icon']} {it['title']}",
+                      "weight": "bold", "size": "sm", "wrap": True},
+                     {"type": "text", "text": it["short"], "size": "xs",
+                      "color": "#8b9bb4", "wrap": True},
+                 ]},
+            ],
+        })
+    body.append({"type": "separator", "margin": "md"})
+    body.append({"type": "text",
+                 "text": "ค่า N เป็นค่าประมาณจากเซ็นเซอร์ (กรมฯ วัด N เป็น %)",
+                 "size": "xs", "color": "#8b9bb4", "wrap": True,
+                 "margin": "md"})
+    if time_str:
+        body.append({"type": "text", "text": f"เวลา {time_str}", "size": "xs",
+                     "color": "#8b9bb4", "align": "end", "margin": "xs"})
+
+    bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box", "layout": "vertical", "paddingAll": "12px",
+            "backgroundColor": accent,
+            "contents": [{"type": "text", "text": title, "weight": "bold",
+                          "size": "md", "color": "#ffffff"}],
+        },
+        "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                 "paddingAll": "16px", "contents": body},
+    }
+    btn = _dashboard_button(dashboard_url)
+    if btn:
+        bubble["footer"] = {"type": "box", "layout": "vertical",
+                            "paddingAll": "12px", "contents": [btn]}
+    return {"type": "flex", "altText": alt, "contents": bubble}
+
+
+def format_flex_status(reading, crop_label="Agriscan", dashboard_url=None,
+                       time_str=None):
+    """การ์ดสถานะดินปัจจุบัน (ตอบเมื่อพิมพ์ 'สถานะ')"""
+    def f(v, digits=1, suffix=""):
+        try:
+            return f"{float(v):.{digits}f}{suffix}"
+        except (TypeError, ValueError):
+            return "-"
+
+    m = f(reading.get("moisture"), 1, "%")
+    t = f(reading.get("temperature"), 1, "°C")
+    try:
+        ec = f"{float(reading.get('ec')) / 1000:.1f} dS/m"
+    except (TypeError, ValueError):
+        ec = "-"
+    ph = f(reading.get("ph"))
+    n = f(reading.get("n"), 0)
+    p = f(reading.get("p"), 0)
+    k = f(reading.get("k"), 0)
+
+    body = [
+        {"type": "text", "text": m, "size": "xxl", "weight": "bold",
+         "color": "#16a34a", "align": "center"},
+        {"type": "text", "text": "ความชื้นดิน", "size": "sm",
+         "color": "#8b9bb4", "align": "center", "margin": "xs"},
+        {"type": "separator", "margin": "md"},
+        {"type": "box", "layout": "vertical", "margin": "md", "spacing": "sm",
+         "contents": [
+             _flex_row("อุณหภูมิ", t),
+             _flex_row("EC", ec),
+             _flex_row("pH", ph),
+             _flex_row("N / P / K", f"{n} / {p} / {k} mg/kg"),
+             _flex_row("พืช", crop_label),
+         ]},
+    ]
+    if time_str:
+        body.append({"type": "text", "text": f"ข้อมูลเวลา {time_str}",
+                     "size": "xs", "color": "#8b9bb4", "align": "end",
+                     "margin": "md"})
+
+    bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box", "layout": "vertical", "paddingAll": "12px",
+            "backgroundColor": "#16a34a",
+            "contents": [{"type": "text", "text": "สถานะดิน Agriscan",
+                          "weight": "bold", "size": "md",
+                          "color": "#ffffff"}],
+        },
+        "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                 "paddingAll": "16px", "contents": body},
+    }
+    btn = _dashboard_button(dashboard_url)
+    if btn:
+        bubble["footer"] = {"type": "box", "layout": "vertical",
+                            "paddingAll": "12px", "contents": [btn]}
+    return {"type": "flex",
+            "altText": f"สถานะดิน: ชื้น {m} pH {ph} EC {ec}",
+            "contents": bubble}
+
+
+def format_flex_menu():
+    """การ์ดเมนูคำสั่ง (ตอบเมื่อพิมพ์ 'เมนู')"""
+    bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box", "layout": "vertical", "paddingAll": "12px",
+            "backgroundColor": "#16a34a",
+            "contents": [{"type": "text", "text": "เมนู Agriscan",
+                          "weight": "bold", "size": "md",
+                          "color": "#ffffff"}],
+        },
+        "body": {
+            "type": "box", "layout": "vertical", "spacing": "sm",
+            "paddingAll": "16px",
+            "contents": [
+                {"type": "text", "text": "แตะปุ่มหรือพิมพ์สั่งได้เลย",
+                 "size": "sm", "color": "#8b9bb4", "wrap": True},
+                {"type": "separator", "margin": "md"},
+                {"type": "box", "layout": "vertical", "margin": "md",
+                 "spacing": "sm",
+                 "contents": [
+                     _flex_row("ดูค่าดิน", "พิมพ์ 'สถานะ'"),
+                     _flex_row("วิธีใช้", "พิมพ์ 'วิธีใช้'"),
+                 ]},
+            ],
+        },
+        "footer": {
+            "type": "box", "layout": "vertical", "spacing": "sm",
+            "paddingAll": "12px",
+            "contents": [
+                {"type": "button", "style": "primary", "height": "sm",
+                 "action": {"type": "message", "label": "ดูสถานะดิน",
+                            "text": "สถานะ"}},
+                {"type": "button", "style": "link", "height": "sm",
+                 "action": {"type": "message", "label": "วิธีใช้",
+                            "text": "วิธีใช้"}},
+            ],
+        },
+    }
+    return {"type": "flex", "altText": "เมนู Agriscan: สถานะ วิธีใช้",
+            "contents": bubble}

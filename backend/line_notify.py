@@ -55,56 +55,73 @@ def _post(path, payload, timeout=10):
         return False, {"error": str(e)[:300]}
 
 
-def push_text(to_id, text, timeout=10):
-    """ส่งหาคนเดียว/กลุ่มเดียว (ต้องมี userId/groupId)"""
+def _text_messages(text):
+    return [{"type": "text", "text": str(text)[:4900]}]
+
+
+def push_msg(to_id, messages, timeout=10):
+    """ส่ง message objects (text/flex) หาคนเดียว/กลุ่มเดียว"""
+    if isinstance(messages, dict):
+        messages = [messages]
     if is_dry_run():
-        print(f"[LINE][DRY-RUN] push → {to_id}: {text[:200]}")
+        print(f"[LINE][DRY-RUN] push -> {to_id}: {str(messages)[:200]}")
         return True, {"dry_run": True}
     if not get_token():
         print("[LINE] ยังไม่ตั้ง LINE_CHANNEL_ACCESS_TOKEN — ข้ามการส่ง")
         return False, {"error": "LINE_CHANNEL_ACCESS_TOKEN not set"}
     if not to_id:
         return False, {"error": "missing target id"}
-    return _post("/push", {"to": to_id, "messages": [{"type": "text", "text": text}]},
+    return _post("/push", {"to": to_id, "messages": messages},
                  timeout=timeout)
 
 
-def multicast_text(user_ids, text, timeout=10):
-    """ส่งหาผู้ลงทะเบียนหลายคน (chunk ละ 500 ตาม limit LINE)"""
+def push_text(to_id, text, timeout=10):
+    """ส่งหาคนเดียว/กลุ่มเดียว (ต้องมี userId/groupId)"""
+    return push_msg(to_id, _text_messages(text), timeout=timeout)
+
+
+def multicast_msg(user_ids, messages, timeout=10):
+    """ส่ง message objects หาผู้ลงทะเบียนหลายคน (chunk ละ 500)"""
+    if isinstance(messages, dict):
+        messages = [messages]
     ids = list(dict.fromkeys([u for u in (user_ids or []) if u]))
     if not ids:
         return False, {"error": "no subscribers"}
     if is_dry_run():
-        print(f"[LINE][DRY-RUN] multicast -> {len(ids)} subs: {text[:200]}")
+        print(f"[LINE][DRY-RUN] multicast -> {len(ids)} subs: "
+              f"{str(messages)[:200]}")
         return True, {"dry_run": True, "count": len(ids)}
     if not get_token():
         print("[LINE] ยังไม่ตั้ง LINE_CHANNEL_ACCESS_TOKEN — ข้ามการส่ง")
         return False, {"error": "LINE_CHANNEL_ACCESS_TOKEN not set"}
     sent = 0
     for i in range(0, len(ids), 500):
-        ok, info = _post(
-            "/multicast",
-            {"to": ids[i:i + 500],
-             "messages": [{"type": "text", "text": text[:4900]}]},
-            timeout=timeout,
-        )
+        ok, info = _post("/multicast",
+                         {"to": ids[i:i + 500], "messages": messages},
+                         timeout=timeout)
         if not ok:
             return False, info
         sent += len(ids[i:i + 500])
     return True, {"count": sent}
 
 
-def reply_text(reply_token, text, timeout=10):
-    """ตอบกลับในแชท (ใช้ replyToken จาก webhook — ยืนยันช่องสองทางทันที)"""
+def multicast_text(user_ids, text, timeout=10):
+    """ส่งหาผู้ลงทะเบียนหลายคน (chunk ละ 500 ตาม limit LINE)"""
+    return multicast_msg(user_ids, _text_messages(text), timeout=timeout)
+
+
+def reply_msg(reply_token, messages, timeout=10):
+    """ตอบกลับด้วย message objects (ใช้ replyToken จาก webhook)"""
+    if isinstance(messages, dict):
+        messages = [messages]
     if is_dry_run():
-        print(f"[LINE][DRY-RUN] reply: {text[:200]}")
+        print(f"[LINE][DRY-RUN] reply: {str(messages)[:200]}")
         return True, {"dry_run": True}
     if not get_token():
         return False, {"error": "LINE_CHANNEL_ACCESS_TOKEN not set"}
     if not reply_token:
         return False, {"error": "missing reply token"}
-    payload = {"replyToken": reply_token,
-               "messages": [{"type": "text", "text": text[:4900]}]}
+    payload = {"replyToken": reply_token, "messages": messages}
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         API_BASE + "/reply", data=body,
@@ -125,6 +142,11 @@ def reply_text(reply_token, text, timeout=10):
     except Exception as e:
         print(f"[LINE] reply ล้มเหลว: {e}")
         return False, {"error": str(e)[:300]}
+
+
+def reply_text(reply_token, text, timeout=10):
+    """ตอบกลับด้วยข้อความธรรมดา"""
+    return reply_msg(reply_token, _text_messages(text), timeout=timeout)
 
 
 def get_profile(user_id, timeout=10):

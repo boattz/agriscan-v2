@@ -13,6 +13,8 @@
 ### Added
 - **แจ้งเตือน LINE (Phase 1)** — backend ประเมินค่าทุก reading ด้วย `backend/alerts.py` (mirror เกณฑ์ `crops.js` + กติกา `buildRecommendations`) แล้วยิง LINE OA Messaging API แม้ปิดเบราว์เซอร์ — กันสแปมด้วยตาราง `alert_state` (cooldown 60 นาที/หัวข้อ, ปุ่มทดสอบ 10 นาที) + endpoints `POST /api/alerts/test`, `GET /api/alerts/status` + การ์ด LINE บน dashboard + env ใหม่ใน `render.yaml` (เกณฑ์พืชเดียวกลางผ่าน `ALERT_CROP`, default `other`)
 - **LINE webhook ลงทะเบียนผู้รับ (แบบ Agriflow)** — `POST /api/line/webhook` เก็บ userId ลงตาราง `line_subscribers` + ตอบยืนยันกลับแชททันที — ส่งทุก alert แบบ multicast หาเฉพาะผู้ลงทะเบียน (ไม่มี LINE_TARGET_MODE แล้ว ไม่ยิง broadcast เปล่า) + `GET /api/line/subscribers` (X-API-Key) + นับผู้รับบนการ์ด dashboard
+- **LINE สวย + เงียบลง + ถามตอบได้** — alert ส่งเป็นการ์ด Flex (แดง/เหลือง/เขียว + ปุ่มเปิด Dashboard) แทนข้อความล้วน · default `ALERT_MIN_SEVERITY=alert` เตือนเฉพาะเรื่องสำคัญ (ดินแห้ง/กรดจัด/P-K ต่ำ/เค็ม/ร้อนจัด) · พิมพ์ `สถานะ` ในแชทได้การ์ดค่าดินล่าสุด, `เมนู`/`วิธีใช้` ดูคำสั่ง (webhook router + `format_flex_status`/`format_flex_menu`)
+- **LINE ไม่เตือนรัว** — ส่งครั้งเดียวตอนอาการเกิดใหม่เท่านั้น (edge-triggered): เป็นค้างอยู่ไม่ส่งซ้ำ, หายแล้วกลับมาเป็นอีกค่อยเตือน (กัน flapping ด้วย cooldown) + `status` คืน `active_alerts` (เรื่องที่กำลังเป็นอยู่)
 
 ### Changed
 - **เกณฑ์ NPK แยกรายพืช** — N/P/K thresholds ไม่ใช้ชุดเดียวทั้งระบบอีกต่อไป แต่ละพืชมีค่าของตัวเอง (เช่น ข้าวโพด/ผัก N สูง · มันสำปะหลัง/ทุเรียน/มันฝรั่ง K สูง · มันสำปะหลังทน N ต่ำ) — baseline อ้างอิง LDD ตาราง 15 (ระดับธาตุในดิน) แล้วปรับตามความต้องการธาตุแต่ละพืช

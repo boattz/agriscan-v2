@@ -47,9 +47,11 @@ RETAIN_DAYS = int(os.environ.get("RETAIN_DAYS", "7"))
 # ── LINE Alerts (พืชเดียวกลาง + ส่งหาผู้ลงทะเบียน) ───────────
 # เกณฑ์พืชที่ใช้ตัดสิน — key ตาม dashboard/crops.js (เช่น rice, corn, other)
 ALERT_CROP = os.environ.get("ALERT_CROP", "other")
-# ความรุนแรงขั้นต่ำที่จะส่ง: warn = เอาหมด, alert = เฉพาะวิกฤต
-ALERT_MIN_SEVERITY = os.environ.get("ALERT_MIN_SEVERITY", "warn")
-# กันสแปม: alert เดิมส่งซ้ำได้ทุกกี่นาที (โควต้า Messaging API ฟรี 200/เดือน)
+# ความรุนแรงขั้นต่ำที่จะส่ง: alert = เฉพาะเรื่องสำคัญ (default)
+# อยากได้เตือนละเอียดด้วยตั้ง warn (รวมดินชื้นเกิน/pH เบี่ยง/N-P-K ปานกลาง)
+ALERT_MIN_SEVERITY = os.environ.get("ALERT_MIN_SEVERITY", "alert")
+# กันเตือนรัว: cooldown เป็นแค่ตาข่ายกัน flapping (หายแล้วเป็นใหม่ถี่ๆ)
+# ปกติส่งครั้งเดียวตอนอาการเกิดใหม่เท่านั้น ไม่ส่งซ้ำทุกชั่วโมง
 ALERT_COOLDOWN_MIN = int(os.environ.get("ALERT_COOLDOWN_MIN", "60"))
 # ส่งให้ใคร: ผู้ลงทะเบียนในตาราง line_subscribers ทุกคน (multicast)
 # ลงทะเบียนโดยแอด OA แล้วทักแชท 1 ครั้ง (webhook เก็บ userId ให้เอง)
@@ -214,25 +216,32 @@ def _parse_ts(value):
     return dt
 
 
-def _cooldown_expired(alert_key, cooldown_min):
-    """alert นี้พ้น cooldown แล้วหรือยัง (True = ส่งได้)"""
+def _get_alert_states():
+    """สถานะทุก key: {key: (severity, last_sent_at)} — severity 'clear' = หายแล้ว"""
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                f"SELECT last_sent_at FROM alert_state WHERE alert_key = {PARAM}",
-                (alert_key,),
-            )
-            row = cur.fetchone()
+                "SELECT alert_key, severity, last_sent_at FROM alert_state")
+            return {r["alert_key"]: (r["severity"] or "",
+                                     _parse_ts(r["last_sent_at"]))
+                    for r in cur.fetchall()}
     except Exception as e:
-        print("[Alert] อ่าน alert_state ล้มเหลว (ยอมให้ส่ง):", e)
+        print("[Alert] อ่าน alert_state ล้มเหลว:", e)
+        return {}
+
+
+def _cooldown_ok(last_sent, cooldown_min):
+    if last_sent is None:
         return True
-    if row is None:
-        return True
-    ts = _parse_ts(row["last_sent_at"])
-    if ts is None:
-        return True
-    age_min = (datetime.now(timezone.utc) - ts).total_seconds() / 60
+    age_min = (datetime.now(timezone.utc) - last_sent).total_seconds() / 60
     return age_min >= cooldown_min
+
+
+def _cooldown_expired(alert_key, cooldown_min):
+    """ปุ่มทดสอบใช้ — ดูแค่เวลา (True = ส่งได้)"""
+    states = _get_alert_states()
+    _, last_sent = states.get(alert_key, ("", None))
+    return _cooldown_ok(last_sent, cooldown_min)
 
 
 def _mark_sent(alert_key, severity):
@@ -278,19 +287,31 @@ def _get_active_subscriber_ids():
 def evaluate_and_notify(reading):
     """ประเมิน 1 reading แล้วส่ง LINE (รันใน background thread — ห้ามบล็อก API)
 
-    กติกันสแปม: ส่งเฉพาะ alert ที่พ้น cooldown แล้ว รวมเป็นข้อความเดียว
-    ส่งหาเฉพาะผู้ลงทะเบียน (multicast) — ไม่มีผู้รับ = ข้าม ไม่ยิง broadcast
+    ไม่เตือนรัว: ส่งครั้งเดียวตอนอาการ 'เกิดใหม่' เท่านั้น
+    - ยังเป็นอยู่ (เคยส่งแล้ว) → เงียบ
+    - หายแล้วกลับมาเป็นอีก → เตือนซ้ำได้ (กัน flapping ด้วย cooldown)
     """
     crop_key = alerts.get_crop_key(ALERT_CROP)
     items = alerts.filter_by_severity(
         alerts.evaluate(reading, crop_key), ALERT_MIN_SEVERITY)
-    if not items:
-        return {"sent": False, "reason": "no alerts"}
+    now_active = {i["key"]: i for i in items}
+    states = _get_alert_states()
 
-    fresh = [i for i in items if _cooldown_expired(i["key"], ALERT_COOLDOWN_MIN)]
+    # key ที่เคย active แต่ตอนนี้หายแล้ว → ตั้งเป็น clear (เงียบ ไม่ส่ง)
+    for key, (sev, _) in states.items():
+        if key == "manual_test":
+            continue
+        if key not in now_active and sev in ("alert", "warn"):
+            _mark_sent(key, "clear")
+            print(f"[Alert] {key} กลับสู่เกณฑ์แล้ว — รอบหน้าเป็นอีกค่อยเตือน")
+
+    # ส่งเฉพาะ key ที่เพิ่งเกิดใหม่ (ไม่เคย active) + พ้น cooldown กัน flapping
+    fresh = [i for key, i in now_active.items()
+             if states.get(key, ("", None))[0] not in ("alert", "warn")
+             and _cooldown_ok(states.get(key, ("", None))[1],
+                             ALERT_COOLDOWN_MIN)]
     if not fresh:
-        return {"sent": False, "reason": "cooldown",
-                "suppressed": [i["key"] for i in items]}
+        return {"sent": False, "reason": "no new alerts"}
 
     user_ids = _get_active_subscriber_ids()
     if not user_ids:
@@ -301,11 +322,11 @@ def evaluate_and_notify(reading):
 
     crop = alerts.get_crop(crop_key)
     now_str = datetime.now().strftime("%H:%M:%S")
-    text = alerts.format_line_message(
+    card = alerts.format_flex_alert(
         crop["label"], crop["icon"], fresh,
         dashboard_url=DASHBOARD_PUBLIC_URL, time_str=now_str)
 
-    ok, info = line_notify.multicast_text(user_ids, text)
+    ok, info = line_notify.multicast_msg(user_ids, card)
     if ok:
         for i in fresh:
             _mark_sent(i["key"], i["severity"])
@@ -466,7 +487,12 @@ def alerts_test():
                         "reason": "ยังไม่มีผู้ลงทะเบียน — "
                                   "แอด OA แล้วทักแชท 1 ครั้งก่อน"}), 400
 
-    ok, info = line_notify.multicast_text(user_ids, text)
+    card = alerts.format_flex_alert(
+        crop["label"], crop["icon"], items,
+        dashboard_url=DASHBOARD_PUBLIC_URL)
+    ok, info = line_notify.multicast_msg(
+        user_ids,
+        [{"type": "text", "text": "ทดสอบระบบแจ้งเตือน Agriscan"}, card])
     if ok:
         _mark_sent("manual_test", "warn")
     return jsonify({"sent": ok, "preview": text, "info": info})
@@ -514,6 +540,9 @@ def alerts_status():
         "cooldown_min": ALERT_COOLDOWN_MIN,
         "add_friend_url": LINE_ADD_FRIEND_URL,
         "subscribers": _count_subscribers(),
+        "active_alerts": sorted(
+            k for k, (sev, _) in _get_alert_states().items()
+            if k != "manual_test" and sev in ("alert", "warn")),
         "last_alerts": last_alerts,
         "latest_age_s": latest_age_s,
         "stale": stale,
@@ -590,6 +619,61 @@ def _count_subscribers():
         return 0
 
 
+def _latest_reading():
+    """ค่าล่าสุดจาก DB (ให้บอทตอบ 'สถานะ')"""
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT moisture, temperature, ec, ph, n, p, k, valid, "
+                "created_at FROM readings ORDER BY id DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return {f: row[f] for f in
+                    ["moisture", "temperature", "ec", "ph", "n", "p", "k"]}
+    except Exception:
+        return None
+
+
+HOWTO_TEXT = (
+    "วิธีใช้ Agriscan\n"
+    "- คุณได้ลงทะเบียนรับแจ้งเตือนแล้ว บอทจะส่งการ์ดมาเองเมื่อดินผิดปกติ\n"
+    "- พิมพ์ 'สถานะ' ดูค่าดินล่าสุด\n"
+    "- เปิด Dashboard ดูกราฟ/เกณฑ์ละเอียดได้ตลอด"
+)
+
+
+def _handle_chat(user_id, reply_token, text):
+    """ตอบแชทตามคำสั่ง (สถานะ / เมนู / วิธีใช้)"""
+    t = (text or "").strip()
+    low = t.lower()
+
+    if t in ("สถานะ", "status"):
+        reading = _latest_reading()
+        if reading is None:
+            return line_notify.reply_text(
+                reply_token, "ยังไม่มีข้อมูลเซ็นเซอร์ รอ ESP32 ส่งรอบแรก")
+        crop = alerts.get_crop(alerts.get_crop_key(ALERT_CROP))
+        return line_notify.reply_msg(
+            reply_token,
+            alerts.format_flex_status(
+                reading, f"{crop['icon']} {crop['label']}",
+                dashboard_url=DASHBOARD_PUBLIC_URL,
+                time_str=datetime.now().strftime("%H:%M:%S")))
+
+    if t in ("เมนู", "menu", "help"):
+        return line_notify.reply_msg(reply_token, alerts.format_flex_menu())
+
+    if t in ("วิธีใช้", "วิธีใช"):
+        return line_notify.reply_text(reply_token, HOWTO_TEXT)
+
+    return line_notify.reply_text(
+        reply_token,
+        f"รับทราบ (ลงทะเบียนแล้ว)\n"
+        f"พิมพ์ 'สถานะ' ดูค่าดิน หรือ 'เมนู' ดูคำสั่ง")
+
+
 @app.route("/api/line/webhook", methods=["POST"])
 def line_webhook():
     """รับ event จาก LINE OA → เก็บ userId + ตอบยืนยัน (ตอบ 200 เสมอ กัน retry-storm)"""
@@ -608,11 +692,12 @@ def line_webhook():
         if etype in ("follow", "join"):
             _save_subscriber(user_id, True)
             _set_subscriber_name(user_id, line_notify.get_profile(user_id))
-            line_notify.reply_text(
+            line_notify.reply_msg(
                 ev.get("replyToken"),
-                "ลงทะเบียนรับแจ้งเตือน Agriscan สำเร็จ\n"
-                "alert รอบถัดไปจะส่งเข้าห้องแชทนี้\n"
-                "(พิมพ์อะไรก็ได้เพื่อทดสอบว่าบอทตอบ)",
+                [{"type": "text",
+                  "text": "ลงทะเบียนรับแจ้งเตือน Agriscan สำเร็จ\n"
+                          "บอทจะส่งการ์ดมาเองเมื่อดินผิดปกติ"},
+                 alerts.format_flex_menu()],
             )
         elif etype in ("unfollow", "leave"):
             _save_subscriber(user_id, False)
@@ -621,11 +706,8 @@ def line_webhook():
             if msg.get("type") == "text":
                 _save_subscriber(user_id, True)
                 _set_subscriber_name(user_id, line_notify.get_profile(user_id))
-                line_notify.reply_text(
-                    ev.get("replyToken"),
-                    "รับทราบ (id ลงทะเบียนแล้ว)\n"
-                    "alert รอบถัดไปจะส่งเข้าห้องแชทนี้",
-                )
+                _handle_chat(user_id, ev.get("replyToken"),
+                             msg.get("text") or "")
     return jsonify({"ok": True})
 
 

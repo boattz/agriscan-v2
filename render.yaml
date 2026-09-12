@@ -25,9 +25,9 @@ services:
       - key: ALERT_CROP
         value: other # key ตาม dashboard/crops.js (rice, corn, …)
       - key: ALERT_MIN_SEVERITY
-        value: warn # warn = เอาหมด · alert = เฉพาะวิกฤต
+        value: alert # alert = เฉพาะเรื่องสำคัญ · warn = รวมเตือนเฝ้าระวังด้วย
       - key: ALERT_COOLDOWN_MIN
-        value: 60 # alert เดิมส่งซ้ำได้ทุก 60 นาที (กันเปลืองโควต้า 200/เดือน)
+        value: 60 # กัน flapping (หายแล้วเป็นใหม่ถี่ๆ) — ปกติเตือนครั้งเดียวต่อรอบอยู่แล้ว
       - key: DASHBOARD_PUBLIC_URL
         value: https://agriscan-v2.onrender.com
 
