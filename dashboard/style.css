@@ -206,6 +206,12 @@ body::after {
   color: var(--amber-400);
 }
 
+.status-badge.sensor-error {
+  border-color: rgba(239,68,68,0.5);
+  background: rgba(239,68,68,0.12);
+  color: var(--red-400);
+}
+
 .status-dot {
   width: 10px; height: 10px;
   border-radius: 50%;
@@ -216,6 +222,7 @@ body::after {
 .status-badge.online .status-dot  { animation: pulse-dot 2s infinite; }
 .status-badge.connecting .status-dot { animation: blink-dot 0.8s infinite; }
 .status-badge.stale .status-dot    { animation: blink-dot 0.8s infinite; }
+.status-badge.sensor-error .status-dot { animation: blink-dot 0.5s infinite; }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
@@ -277,6 +284,36 @@ body::after {
   background: rgba(251,191,36,0.1);
   color: var(--amber-400);
 }
+.source-badge.suspect {
+  display: inline-flex;
+  border-color: rgba(251,191,36,0.4);
+  background: rgba(251,191,36,0.1);
+  color: var(--amber-400);
+}
+.source-badge.sensor-bad {
+  display: inline-flex;
+  border-color: rgba(239,68,68,0.5);
+  background: rgba(239,68,68,0.12);
+  color: var(--red-400);
+}
+
+/* แบนเนอร์เซ็นเซอร์ผิดปกติ — ค่าเสียจะไม่ทับค่าเก่า */
+.sensor-banner {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-radius: var(--radius-card);
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.35);
+  margin-bottom: 24px;
+  color: var(--red-400);
+  font-size: 0.95rem;
+}
+.sensor-banner.visible { display: flex; }
+
+/* การ์ดเทาลงเมื่อเซ็นเซอร์เสีย — บอกว่าเห็นค่าค้าง ไม่ใช่ค่าสด */
+.cards-grid.sensor-bad .card { opacity: 0.55; filter: grayscale(0.4); }
 
 /* ══════════════════════════════════════════════
    Connecting overlay
@@ -633,7 +670,21 @@ body::after {
   gap: 10px;
   margin-top: 12px;
   flex-wrap: wrap;
+  align-items: center;
 }
+#line-crop-select {
+  appearance: none;
+  padding: 10px 40px 10px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-dim);
+  background: var(--bg-card) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2393c9a5' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 16px center;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+#line-crop-select:focus { outline: none; border-color: var(--border-glow); }
+#line-crop-select option { background: var(--bg-card-2); }
 a.btn-refresh { text-decoration: none; }
 .btn-refresh:disabled { opacity: 0.5; cursor: wait; }
 

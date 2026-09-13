@@ -13,6 +13,8 @@ Endpoints:
   GET  /api/alerts/status → สถานะระบบแจ้งเตือน + alert ล่าสุด (ให้ dashboard)
   POST /api/line/webhook  ← รับ event จาก LINE OA (เก็บ userId + ตอบยืนยัน)
   GET  /api/line/subscribers → ดู userId ที่ลงทะเบียน (ต้องมี X-API-Key)
+  GET  /api/alerts/crops  → รายชื่อพืชทั้งหมด (ให้ dropdown)
+  GET/POST /api/alerts/crop → ดู/เปลี่ยนพืชที่ใช้ตัดสิน alert
   GET  /              → เสิร์ฟหน้า dashboard
 """
 
@@ -69,6 +71,60 @@ TEST_COOLDOWN_MIN = int(os.environ.get("TEST_COOLDOWN_MIN", "10"))
 CLEANUP_EVERY = 50
 _cleanup_counter = 0
 
+# ── Validation (mirror ขอบเขตใน agriscan.ino — แก้ที่ใดที่หนึ่งต้องแก้อีกที่) ──
+# bad = หลุดโลก → reject 422 ไม่เก็บ · suspect = แปลกแต่เป็นไปได้ → เก็บพร้อม flag
+VALID_RANGES = {
+    "moisture":    (0.0, 100.0),
+    "temperature": (-10.0, 60.0),
+    "ec":          (0, 20000),
+    "ph":          (0.0, 14.0),
+    "n":           (0, 1999),
+    "p":           (0, 1999),
+    "k":           (0, 1999),
+}
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def validate_reading(row):
+    """ตรวจ 1 reading → (decision, quality, reasons)
+
+    decision: 'reject' | 'accept' · quality: 'good' | 'suspect' | 'bad'
+    ESP32 ส่ง quality/reason มาด้วยก็ไม่ไว้ใจทั้งหมด — ตรวจซ้ำฝั่ง server เสมอ
+    """
+    reasons = []
+    for f, (lo, hi) in VALID_RANGES.items():
+        v = _num(row.get(f))
+        if v is None:
+            if f == "moisture":
+                reasons.append("missing:moisture")
+            continue
+        if v < lo or v > hi:
+            reasons.append(f"out_of_range:{f}")
+    if reasons:
+        return "reject", "bad", reasons
+
+    suspect = []
+    t, ec, ph = _num(row.get("temperature")), _num(row.get("ec")), _num(row.get("ph"))
+    if t is not None and t > 50.0:
+        suspect.append("suspect:temp_high")
+    if ec is not None and ec > 5000:
+        suspect.append("suspect:ec_high")
+    if ph is not None and (ph < 3.0 or ph > 10.0):
+        suspect.append("suspect:ph_extreme")
+    # เคารพ flag จาก ESP32 (เช่น suspect:unstable จาก median spread)
+    fw_reason = str(row.get("reason") or "")
+    if fw_reason.startswith("suspect:") and fw_reason not in suspect:
+        suspect.append(fw_reason)
+    if suspect:
+        return "accept", "suspect", suspect
+    return "accept", "good", ["ok"]
+
 app = Flask(__name__)
 CORS(app)
 
@@ -88,6 +144,8 @@ if DATABASE_URL:
         p          INTEGER,
         k          INTEGER,
         valid      BOOLEAN DEFAULT TRUE,
+        quality    TEXT DEFAULT 'good',
+        reason     TEXT DEFAULT 'ok',
         created_at TIMESTAMPTZ DEFAULT NOW()
     );
     """
@@ -104,6 +162,8 @@ else:
         p          INTEGER,
         k          INTEGER,
         valid      INTEGER DEFAULT 1,
+        quality    TEXT DEFAULT 'good',
+        reason     TEXT DEFAULT 'ok',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """
@@ -127,6 +187,12 @@ if DATABASE_URL:
         subscribed_at TIMESTAMPTZ DEFAULT NOW()
     );
     """
+    SETTINGS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT DEFAULT ''
+    );
+    """
 else:
     ALERT_STATE_SCHEMA = """
     CREATE TABLE IF NOT EXISTS alert_state (
@@ -141,6 +207,12 @@ else:
         display_name TEXT,
         active       INTEGER DEFAULT 1,
         subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """
+    SETTINGS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT DEFAULT ''
     );
     """
 
@@ -161,6 +233,18 @@ def init_db():
             conn.execute(SCHEMA)
             conn.execute(ALERT_STATE_SCHEMA)
             conn.execute(LINE_SUBSCRIBERS_SCHEMA)
+            conn.execute(SETTINGS_SCHEMA)
+            # migration ตารางเก่าที่ไม่มี quality/reason (กัน QueryError หลังอัปเดต)
+            for col in ("quality TEXT DEFAULT 'good'", "reason TEXT DEFAULT 'ok'"):
+                try:
+                    if DATABASE_URL:
+                        conn.execute(
+                            "ALTER TABLE readings ADD COLUMN IF NOT EXISTS %s"
+                            % col)
+                    else:
+                        conn.execute("ALTER TABLE readings ADD COLUMN %s" % col)
+                except Exception:
+                    pass  # SQLite: มีคอลัมน์แล้ว → duplicate column, ข้ามได้
             conn.commit()
         print("[OK] Database พร้อมใช้งาน" + (" (PostgreSQL)" if DATABASE_URL else " (SQLite local)"))
     except Exception as e:
@@ -189,6 +273,7 @@ def cleanup_old_readings():
 
 def row_to_json(row):
     ts = row["created_at"]
+    keys = row.keys() if hasattr(row, "keys") else []
     return {
         "moisture":    float(row["moisture"]) if row["moisture"] is not None else None,
         "temperature": float(row["temperature"]) if row["temperature"] is not None else None,
@@ -198,6 +283,8 @@ def row_to_json(row):
         "p":           row["p"],
         "k":           row["k"],
         "valid":       bool(row["valid"]),
+        "quality":     row["quality"] if "quality" in keys and row["quality"] else "good",
+        "reason":      row["reason"] if "reason" in keys and row["reason"] else "ok",
         # PostgreSQL คืน datetime ส่วน SQLite คืน string
         "timestamp":   ts.isoformat() if isinstance(ts, datetime) else ts,
     }
@@ -293,7 +380,10 @@ def evaluate_and_notify(reading):
     - ยังเป็นอยู่ (เคยส่งแล้ว) → เงียบ
     - หายแล้วกลับมาเป็นอีก → เตือนซ้ำได้ (กัน flapping ด้วย cooldown)
     """
-    crop_key = alerts.get_crop_key(ALERT_CROP)
+    # ค่าไม่น่าเชื่อถือ (valid=false / quality=bad) → ไม่ประเมิน ไม่ส่ง LINE
+    if not reading.get("valid", True) or reading.get("quality") == "bad":
+        return {"sent": False, "reason": "invalid reading — skipped"}
+    crop_key = _effective_crop()
     items = alerts.filter_by_severity(
         alerts.evaluate(reading, crop_key), ALERT_MIN_SEVERITY)
     now_active = {i["key"]: i for i in items}
@@ -385,16 +475,30 @@ def add_reading():
     if row["moisture"] is None:
         return jsonify({"error": "missing required field: moisture"}), 400
 
+    # ตรวจซ้ำฝั่ง server (ไม่ไว้ใจ firmware อย่างเดียว)
+    # bad → 422 ทิ้ง ไม่เก็บ ไม่ยิง LINE · suspect → เก็บพร้อม flag
+    decision, quality, reasons = validate_reading({**row, **data})
+    if decision == "reject":
+        print(f"⚠ Reject reading หลุดโลก: {reasons} <- {row}")
+        return jsonify({"error": "ค่าหลุดช่วงที่เป็นไปได้",
+                        "reasons": reasons}), 422
+
     valid = bool(data.get("valid", True))
-    placeholders = ", ".join([PARAM] * (len(fields) + 1))
+    if not valid:
+        quality = "bad"
+        reasons = [str(data.get("reason") or "firmware invalid")]
+    reason_str = ",".join(reasons[:3])
+    placeholders = ", ".join([PARAM] * (len(fields) + 3))
     sql = (
-        "INSERT INTO readings (moisture, temperature, ec, ph, n, p, k, valid) "
+        "INSERT INTO readings (moisture, temperature, ec, ph, n, p, k, valid, "
+        "quality, reason) "
         f"VALUES ({placeholders})"
     )
 
     try:
         with get_conn() as conn:
-            conn.execute(sql, (*[row[f] for f in fields], valid))
+            conn.execute(sql, (*[row[f] for f in fields], valid, quality,
+                                reason_str))
             conn.commit()
     except Exception as e:
         print("⚠ Insert ล้มเหลว:", e)
@@ -407,9 +511,13 @@ def add_reading():
         cleanup_old_readings()
 
     # ประเมิน alert + ส่ง LINE แบบ async (ไม่บล็อก response 201)
-    _notify_async({**row, "valid": valid})
+    # ข้ามเมื่อ suspect/bad ที่เป็น sensor-error? — suspect ยังเตือนได้ (ค่าจริงแต่แปลก),
+    # bad ไม่ถึงจุดนี้แล้ว (reject ข้างบน) ยกเว้น firmware valid=false ที่ผ่านมาแบบ quality=bad
+    if quality != "bad":
+        _notify_async({**row, "valid": valid, "quality": quality})
 
-    return jsonify({"success": True}), 201
+    return jsonify({"success": True, "quality": quality,
+                    "reasons": reasons}), 201
 
 
 @app.route("/api/latest", methods=["GET"])
@@ -418,7 +526,8 @@ def latest():
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT moisture, temperature, ec, ph, n, p, k, valid, created_at "
+                "SELECT moisture, temperature, ec, ph, n, p, k, valid, "
+                "quality, reason, created_at "
                 "FROM readings ORDER BY id DESC LIMIT 1"
             )
             row = cur.fetchone()
@@ -460,7 +569,8 @@ def alerts_test():
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT moisture, temperature, ec, ph, n, p, k, valid, "
-                    "created_at FROM readings ORDER BY id DESC LIMIT 1"
+                    "quality, reason, created_at FROM readings "
+                    "ORDER BY id DESC LIMIT 1"
                 )
                 latest_row = cur.fetchone()
         except Exception as e:
@@ -470,7 +580,7 @@ def alerts_test():
         reading = {f: latest_row[f] for f in
                    ["moisture", "temperature", "ec", "ph", "n", "p", "k"]}
 
-    crop_key = alerts.get_crop_key(ALERT_CROP)
+    crop_key = _effective_crop()
     items = alerts.filter_by_severity(
         alerts.evaluate(reading, crop_key), ALERT_MIN_SEVERITY)
     crop = alerts.get_crop(crop_key)
@@ -503,7 +613,7 @@ def alerts_test():
 @app.route("/api/alerts/status", methods=["GET"])
 def alerts_status():
     """สถานะระบบแจ้งเตือนให้ dashboard (ไม่เปิดเผย token)"""
-    crop_key = alerts.get_crop_key(ALERT_CROP)
+    crop_key = _effective_crop()
     crop = alerts.get_crop(crop_key)
 
     latest_age_s, stale = None, None
@@ -621,19 +731,70 @@ def _count_subscribers():
         return 0
 
 
+def _get_setting(key, default=""):
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                f'SELECT "value" FROM settings WHERE "key" = {PARAM}', (key,))
+            row = cur.fetchone()
+            if row is None:
+                return default
+            return row["value"] if row["value"] != "" else default
+    except Exception:
+        return default
+
+
+def _set_setting(key, value):
+    try:
+        with get_conn() as conn:
+            if DATABASE_URL:
+                conn.execute(
+                    'INSERT INTO settings ("key", "value") VALUES (%s, %s) '
+                    'ON CONFLICT ("key") DO UPDATE SET "value" = '
+                    "EXCLUDED.value",
+                    (key, value),
+                )
+            else:
+                conn.execute(
+                    'INSERT INTO settings ("key", "value") VALUES (?, ?) '
+                    'ON CONFLICT ("key") DO UPDATE SET "value" = '
+                    "excluded.value",
+                    (key, value),
+                )
+            conn.commit()
+            return True
+    except Exception as e:
+        print("[Alert] บันทึก setting ล้มเหลว:", e)
+        return False
+
+
+def _effective_crop():
+    """พืชที่ใช้ตัดสิน alert — ค่าที่เลือกผ่าน dashboard มาก่อน, env เป็น default"""
+    return alerts.get_crop_key(_get_setting("alert_crop", ALERT_CROP))
+
+
 def _latest_reading():
     """ค่าล่าสุดจาก DB (ให้บอทตอบ 'สถานะ')"""
     try:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT moisture, temperature, ec, ph, n, p, k, valid, "
-                "created_at FROM readings ORDER BY id DESC LIMIT 1"
+                "quality, reason, created_at FROM readings "
+                "ORDER BY id DESC LIMIT 1"
             )
             row = cur.fetchone()
             if row is None:
                 return None
-            return {f: row[f] for f in
-                    ["moisture", "temperature", "ec", "ph", "n", "p", "k"]}
+            keys = row.keys() if hasattr(row, "keys") else []
+            out = {f: row[f] for f in
+                   ["moisture", "temperature", "ec", "ph", "n", "p", "k"]}
+            out["quality"] = row["quality"] if "quality" in keys else "good"
+            out["reason"] = row["reason"] if "reason" in keys else "ok"
+            try:
+                out["valid"] = bool(row["valid"])
+            except Exception:
+                out["valid"] = True
+            return out
     except Exception:
         return None
 
@@ -656,7 +817,12 @@ def _handle_chat(user_id, reply_token, text):
         if reading is None:
             return line_notify.reply_text(
                 reply_token, "ยังไม่มีข้อมูลเซ็นเซอร์ รอ ESP32 ส่งรอบแรก")
-        crop = alerts.get_crop(alerts.get_crop_key(ALERT_CROP))
+        if not reading.get("valid", True) or reading.get("quality") == "bad":
+            return line_notify.reply_text(
+                reply_token,
+                f"⚠️ เซ็นเซอร์ผิดปกติ ({reading.get('reason', '?')}) — "
+                "ตรวจสอบสาย RS485/ไฟเลี้ยง/การจุ่ม probe แล้วดูบน Dashboard อีกครั้ง")
+        crop = alerts.get_crop(_effective_crop())
         return line_notify.reply_msg(
             reply_token,
             alerts.format_flex_status(
@@ -735,6 +901,37 @@ def line_subscribers():
     except Exception:
         return jsonify({"error": "database unavailable"}), 503
     return jsonify({"count": len(subs), "subscribers": subs})
+
+
+@app.route("/api/alerts/crops", methods=["GET"])
+def alerts_crops():
+    """รายชื่อพืชทั้งหมดให้ dropdown เลือกพืชที่จะใช้เตือน"""
+    return jsonify({"current": _effective_crop(),
+                    "crops": alerts.list_crops()})
+
+
+@app.route("/api/alerts/crop", methods=["GET", "POST"])
+def alerts_crop():
+    """ดู/เปลี่ยนพืชที่ใช้ตัดสิน alert (เก็บใน DB — restart ไม่หาย)"""
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        key = alerts.get_crop_key(body.get("crop", ""))
+        if body.get("crop", "") not in alerts.CROPS:
+            return jsonify({"error": "unknown crop",
+                            "crops": alerts.list_crops()}), 400
+        _set_setting("alert_crop", key)
+        # เปลี่ยนพืช = เกณฑ์เปลี่ยน → ล้างสถานะ active เก่า กันค้างเตือนผิดเกณฑ์
+        try:
+            with get_conn() as conn:
+                conn.execute("DELETE FROM alert_state "
+                             "WHERE alert_key != 'manual_test'")
+                conn.commit()
+        except Exception:
+            pass
+    key = _effective_crop()
+    crop = alerts.get_crop(key)
+    return jsonify({"crop": key,
+                    "crop_label": f"{crop['icon']} {crop['label']}"})
 
 
 init_db()

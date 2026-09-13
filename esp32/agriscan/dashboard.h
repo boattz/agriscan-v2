@@ -220,6 +220,12 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
       color: var(--amber-400);
     }
     
+    .status-badge.sensor-error {
+      border-color: rgba(239,68,68,0.5);
+      background: rgba(239,68,68,0.12);
+      color: var(--red-400);
+    }
+    
     .status-dot {
       width: 10px; height: 10px;
       border-radius: 50%;
@@ -230,6 +236,7 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
     .status-badge.online .status-dot  { animation: pulse-dot 2s infinite; }
     .status-badge.connecting .status-dot { animation: blink-dot 0.8s infinite; }
     .status-badge.stale .status-dot    { animation: blink-dot 0.8s infinite; }
+    .status-badge.sensor-error .status-dot { animation: blink-dot 0.5s infinite; }
     
     @keyframes pulse-dot {
       0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
@@ -291,6 +298,32 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
       background: rgba(251,191,36,0.1);
       color: var(--amber-400);
     }
+    .source-badge.suspect {
+      display: inline-flex;
+      border-color: rgba(251,191,36,0.4);
+      background: rgba(251,191,36,0.1);
+      color: var(--amber-400);
+    }
+    .source-badge.sensor-bad {
+      display: inline-flex;
+      border-color: rgba(239,68,68,0.5);
+      background: rgba(239,68,68,0.12);
+      color: var(--red-400);
+    }
+    .sensor-banner {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      border-radius: var(--radius-card);
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.35);
+      margin-bottom: 24px;
+      color: var(--red-400);
+      font-size: 0.95rem;
+    }
+    .sensor-banner.visible { display: flex; }
+    .cards-grid.sensor-bad .card { opacity: 0.55; filter: grayscale(0.4); }
     
     /* ══════════════════════════════════════════════
        Connecting overlay
@@ -857,6 +890,12 @@ const char* dashboard_html = R"rawliteral(<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- ═══ SENSOR ERROR BANNER ═══ -->
+  <div class="sensor-banner" id="sensor-banner">
+    <span>🔴</span>
+    <p id="sensor-text" style="flex:1;">เซ็นเซอร์ผิดปกติ</p>
+  </div>
+
   <!-- ═══ MOCK DATA BANNER ═══ -->
   <div class="mock-banner" id="mock-banner">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
@@ -1160,9 +1199,13 @@ async function fetchData() {
       if (!isNaN(t)) age = Date.now() - t;
     }
     const stale = age !== null && age > CONFIG.staleAfter;
+    const sensorBad = json.valid === false || json.quality === 'bad';
 
-    setStatus(stale ? 'stale' : 'online');
-    updateSourceBadge(false, stale, age);
+    updateUI(json);   // updateUI รู้จัก valid/quality — ค่าเสียจะไม่ทับค่าเก่า
+    if (sensorBad)      setStatus('sensor-error');
+    else if (stale)     setStatus('stale');
+    else                setStatus('online');
+    updateSourceBadge(false, stale, age, json.quality, json.reason, sensorBad);
     hideBanners();
   } catch (err) {
     state.online = false;
@@ -1174,8 +1217,39 @@ async function fetchData() {
   }
 }
 
-// ─── Update UI ────────────────────────────────────────────
+// ─── Update UI (ค่าเสีย valid=false/quality=bad → ไม่ทับค่าเก่า ไม่สร้างคำแนะนำมั่ว) ──
+const REASON_TH = {
+  'ok': 'ปกติ',
+  'modbus_timeout': 'อ่านเซ็นเซอร์ไม่ติด (Modbus timeout) — เช็คสาย RS485/ไฟเลี้ยง',
+  'suspect:unstable': 'ค่าค่อนข้างสวิง — เฝ้าระวัง',
+  'suspect:temp_high': 'อุณหภูมิสูงผิดปกติ — เฝ้าระวัง',
+  'suspect:ec_high': 'EC สูงผิดปกติ — เฝ้าระวัง',
+  'suspect:ph_extreme': 'pH อยู่ขอบสุด — เฝ้าระวัง'
+};
+function reasonTh(r) {
+  if (!r) return '';
+  if (REASON_TH[r]) return REASON_TH[r];
+  if (r.indexOf('out_of_range:') === 0) return 'ค่าหลุดโลก (' + r.split(':')[1] + ') — เซ็นเซอร์/สายอาจมีปัญหา';
+  if (r.indexOf('suspect:') === 0) return 'น่าสงสัย (' + r.split(':')[1] + ') — เฝ้าระวัง';
+  return r;
+}
 function updateUI(d) {
+  if (d.valid === false || d.quality === 'bad') {
+    setStatus('sensor-error');
+    var sb = $('sensor-banner');
+    if (sb) {
+      sb.classList.add('visible');
+      var t = $('sensor-text');
+      if (t) t.textContent = '⚠️ เซ็นเซอร์ผิดปกติ — ' + reasonTh(d.reason || 'invalid') + ' · กำลังแสดงค่าดีล่าสุดค้างไว้';
+    }
+    var grid = document.getElementById('cards-grid');
+    if (grid) grid.classList.add('sensor-bad');
+    return;
+  }
+  var sb2 = $('sensor-banner');
+  if (sb2) sb2.classList.remove('visible');
+  var grid2 = document.getElementById('cards-grid');
+  if (grid2) grid2.classList.remove('sensor-bad');
   state.data = d;
   const crop = getCrop();
   const c = crop; // shorthand
@@ -1362,6 +1436,8 @@ function setStatus(mode) {
     text.textContent = 'ออนไลน์';
   } else if (mode === 'stale') {
     text.textContent = 'ออนไลน์ (ข้อมูลเก่า)';
+  } else if (mode === 'sensor-error') {
+    text.textContent = 'เซ็นเซอร์ผิดปกติ';
   } else if (mode === 'offline') {
     text.textContent = state.isMock ? 'ออฟไลน์ (Mock)' : 'ออฟไลน์';
   } else {
@@ -1371,7 +1447,7 @@ function setStatus(mode) {
 
 // ─── แหล่งข้อมูล + อายุข้อมูล (badge แยกจากสถานะออนไลน์/ออฟไลน์) ──
 // isCloud: true = คลาวด์ Render · false = ESP32 ท้องถิ่น · null = ไม่มีข้อมูล
-function updateSourceBadge(isCloud, stale, age) {
+function updateSourceBadge(isCloud, stale, age, quality, reason, sensorBad) {
   const el = $('source-badge');
   if (!el) return;
 
@@ -1381,10 +1457,19 @@ function updateSourceBadge(isCloud, stale, age) {
     return;
   }
 
+  if (sensorBad) {
+    el.className = 'source-badge sensor-bad';
+    el.textContent = '🔴 เซ็นเซอร์ผิดปกติ · ' + reasonTh(reason);
+    return;
+  }
+
   const source = isCloud ? 'คลาวด์' : 'ESP32 ท้องถิ่น';
   if (stale) {
     el.className = 'source-badge stale';
     el.textContent = `🟡 ${source} · ข้อมูลเก่า ${formatAge(age)}`;
+  } else if (quality === 'suspect') {
+    el.className = 'source-badge suspect';
+    el.textContent = `🟡 ${source} · ค่าน่าสงสัย (${reasonTh(reason)})`;
   } else {
     el.className = 'source-badge fresh';
     el.textContent = isCloud ? '☁️ คลาวด์ · ข้อมูลสด' : '🟢 ESP32 ท้องถิ่น · ข้อมูลสด';
