@@ -37,8 +37,9 @@ DASHBOARD_DIR = os.path.join(BASE_DIR, "..", "dashboard")
 # API key สำหรับกันคนอื่นส่งข้อมูลปลอม — ตั้งผ่าน env บน Render
 API_KEY = os.environ.get("API_KEY", "agriscan-dev-key")
 
-# ถ้าตั้ง DATABASE_URL (บน Render) จะใช้ PostgreSQL
+# ถ้าตั้ง DATABASE_URL (Neon / Render Postgres) จะใช้ PostgreSQL
 # ถ้าไม่ตั้ง (รันในเครื่อง) จะใช้ SQLite file อัตโนมัติ
+# Neon: ใช้ pooled connection string (มี ?sslmode=require ท้าย URL)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # เก็บข้อมูลกี่วันแล้วลบทิ้งอัตโนมัติ (กัน database เต็ม) — ตั้งผ่าน env RETAIN_DAYS
@@ -147,7 +148,8 @@ else:
 def get_conn():
     """คืน connection — PostgreSQL เมื่อมี DATABASE_URL, ไม่เช่นนั้น SQLite"""
     if DATABASE_URL:
-        return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+        return psycopg.connect(
+            DATABASE_URL, row_factory=dict_row, connect_timeout=10)
     conn = sqlite3.connect(os.path.join(BASE_DIR, "agriscan.db"))
     conn.row_factory = sqlite3.Row
     return conn
